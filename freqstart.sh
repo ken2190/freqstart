@@ -1,5 +1,16 @@
 #!/bin/bash
 clear
+#
+# Since this is a small project where I taught myself some bash scripts,
+# you are welcome to improve the code. If you just use the script and like it,
+# remember that it took a lot of time, testing and also money for infrastructure.
+# You can contribute by donating to the following wallets.
+# Thank you very much for that!
+
+# BTC 1M6wztPA9caJbSrLxa6ET2bDJQdvigZ9hZ
+# ETH 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
+# BSC 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
+#
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly service='freqstart.service'
 
@@ -9,6 +20,12 @@ function _git_validate {
   else
     return 1
   fi
+}
+
+function _env_deactivate {
+	if [ -n "${VIRTUAL_ENV}" ]; then
+		deactivate
+    fi
 }
 
 function _apt {
@@ -34,7 +51,7 @@ function _tmux {
 		sudo apt-get install -y tmux >/dev/null
 		
 		if [[ ! -x "$(command -v tmux)" ]]; then
-			echo "ERROR: TMUX not installed."
+			echo "# ERROR: TMUX not installed."
 			exit 1
 		fi
 	fi
@@ -68,36 +85,37 @@ function _freqtrade {
 					if [[ -f "${path_new}/setup.sh" ]]; then
 						local path="${path_new}"
 
-						echo 'INFO: New "'"${name}"'" version "'"${git_version}"'" has been downloaded.'
+						echo '# INFO: New "'"${name}"'" version "'"${git_version}"'" has been downloaded.'
 						sudo chmod +x "${path_new}/setup.sh"
 						
-						echo 'INFO: Installing "'"${name}"'" may take some time...'
+						echo '# INFO: Installing "'"${name}"'" may take some time...'
 						cd "${path_new}"
 						yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
 							
-						echo 'INFO: Installing "pandas-ta" may take some time...'
+						echo '# INFO: Installing "pandas-ta" may take some time...'
 						cd "${path_new}"
+						_env_deactivate
 						python3 -m venv .env >/dev/null 2>&1
 						source .env/bin/activate
 						python3 -m pip install --upgrade pip >/dev/null 2>&1
 						python3 -m pip install -e . >/dev/null 2>&1
 						pip install pandas-ta >/dev/null 2>&1
-						deactivate
+						_env_deactivate
 					fi
 				else
-					echo 'ERROR: Latest "'"${name}"'" file does not exist.'
+					echo '# ERROR: Latest "'"${name}"'" file does not exist.'
 				fi
 			fi		
 		fi
 	else
-		echo 'ERROR: Can not get latest "'"${name}"'" version.'
+		echo '# ERROR: Can not get latest "'"${name}"'" version.'
 	fi
 	
 	if [[ ! -x $(cd "${path}"; \
 		source .env/bin/activate 2>/dev/null; \
 		command -v freqtrade) ]]; then
 		
-		echo "ERROR: Freqtrade not successfully installed. Restart script and try again."
+		echo "# ERROR: Freqtrade not successfully installed. Restart script and try again."
 		sudo rm -rf "${path}"
 		exit 1		
 	fi
@@ -111,7 +129,7 @@ function _config {
 	if [[ ! -z $(echo "${config}" | grep -e '-c=' -e '--config=') ]]; then
 		local config=$(echo "${config}" | sed 's#-c=##' | sed 's#--config=##')
 		if [[ ! -f "${config}" ]]; then
-			echo 'ERROR: Config "'"${config}"'" not found.'
+			echo '# ERROR: Config "'"${config}"'" not found.'
 			return 1
 		fi
 	fi
@@ -123,39 +141,50 @@ function _nfi {
 	local nfi="${1}"
 	
 	if [[ ! -z $(echo "${nfi}" | grep -e '--strategy-path=') ]]; then
+		local nfi_name='NostalgiaForInfinity'
 		local nfi_path=$(echo "${nfi}" | sed 's#--strategy-path=##')
 		local nfi_version=$(basename "${nfi_path}" | sed 's#.*_##')
 		local nfi_git="https://github.com/iterativv/NostalgiaForInfinity/archive/refs/tags/${nfi_version}.tar.gz"
 		local nfi_latest="https://api.github.com/repos/iterativv/NostalgiaForInfinity/releases/latest"
-		local nfi_latest_version=$(curl -s "${nfi_latest}" | grep -o '"tag_name": ".*"' \
-			| sed 's/"tag_name": "//' \
-			| sed 's/"//')
-
-		if [[ ! -z "${nfi_version}" ]]; then
-			if [[ ! -d "${nfi_path}" || -z "$(ls -A ${nfi_path})" ]]; then
-				if _git_validate "${nfi_git}"; then
-					mkdir -p "${nfi_path}"
-					wget -qO- "${nfi_git}" \
-						| tar xz -C "${nfi_path}" --strip-components=1
-					if [[ -d "${nfi_path}" || ! -z "$(ls -A ${nfi_path})" ]]; then
-						echo 'INFO: Strategy "'"${nfi_version}"'" has been downloaded.'
-					fi
-				else
-					echo 'ERROR: Strategy "'"${nfi_version}"'" not found. Try latest "'"${nfi_latest_version}"'" version.'
-					return 1
-				fi
-			fi
-		else
-			echo 'ERROR: Strategy version is not set. Example: NostalgiaForInfinity_v00.0.000'
-			return 1
-		fi
 		
-		if [[ ! -z "${nfi_latest_version}" ]]; then
-			if [[ "${nfi_latest_version}" != "${nfi_version}" ]]; then
-				echo 'INFO: Newer strategy "'"${nfi_latest_version}"'" available. Always test new strategy versions first!'
+		if [[ ! -z $(echo "${nfi}" | grep -o -E '.*'"${nfi_name}"'.*') ]]; then
+			local nfi_latest_version=$(curl -s "${nfi_latest}" | grep -o '"tag_name": ".*"' \
+				| sed 's/"tag_name": "//' \
+				| sed 's/"//')
+
+			if [[ ! -z "${nfi_version}" ]]; then
+				if [[ ! -d "${nfi_path}" || -z "$(ls -A ${nfi_path})" ]]; then
+					if _git_validate "${nfi_git}"; then
+						mkdir -p "${nfi_path}"
+						wget -qO- "${nfi_git}" \
+							| tar xz -C "${nfi_path}" --strip-components=1
+						if [[ -d "${nfi_path}" || ! -z "$(ls -A ${nfi_path})" ]]; then
+							echo '# INFO: Strategy "'"${nfi_version}"'" has been downloaded.'
+						fi
+					else
+						echo '# ERROR: Strategy "'"${nfi_version}"'" not found. Try latest "'"${nfi_latest_version}"'" version.'
+						return 1
+					fi
+				fi
+			else
+				echo '# ERROR: Strategy version is not set. Example: NostalgiaForInfinity_v00.0.000'
+				return 1
+			fi
+			
+			if [[ ! -z "${nfi_latest_version}" ]]; then
+				if [[ "${nfi_latest_version}" != "${nfi_version}" ]]; then
+					echo '# INFO: Newer strategy "'"${nfi_latest_version}"'" available. Always test new strategy versions first!'
+				fi
+			else
+				echo '# WARNING: Can not get latest strategy version.'
 			fi
 		else
-			echo 'WARNING: Can not get latest strategy version.'
+			if [[ ! -d "${nfi_path}" ]]; then
+				echo '# ERROR: Strategy "'"${nfi_path}"'" not found.'
+				return 1
+			else
+				echo '# INFO: Strategy does not contain "'"${nfi_name}"'" and must be manually verified.'
+			fi
 		fi
 	fi
 }
@@ -195,7 +224,7 @@ function _proxy {
 		printf "${string}" > "${scriptpath}/proxy.json";
 		
 		if [[ ! -f "${scriptpath}/proxy.json" ]]; then
-			echo 'WARNING: Proxy config does not exist.'
+			echo '# WARNING: Proxy config does not exist.'
 		fi
 	fi
 
@@ -212,7 +241,7 @@ function _proxy {
 					wget -qO- "${git_url}" \
 						| tar xz -C "${proxy_new_path}"
 					if [[ -f "${proxy_new_path}/${proxy_name}" ]]; then
-						echo 'INFO: New proxy "'"${git_version}"'" has been downloaded.'
+						echo '# INFO: New proxy "'"${git_version}"'" has been downloaded.'
 
 						sudo chmod +x "${proxy_new_path}/${proxy_name}"
 						local proxy_path="${proxy_new_path}"
@@ -220,16 +249,16 @@ function _proxy {
 						tmux has-session -t "${proxy_name}" 2>/dev/null
 						if [ "$?" -eq 0 ] ; then
 							tmux kill-session -t "${proxy_name}"
-							echo 'WARNING: Restarting "'"${proxy_name}"'" tmux session. Review all running bots!'
+							echo '# WARNING: Restarting "'"${proxy_name}"'" tmux session. Review all running bots!'
 						fi
 					fi
 				else
-					echo 'ERROR: Can not download latest "'"${proxy_name}"'" file.'
+					echo '# ERROR: Can not download latest "'"${proxy_name}"'" file.'
 				fi
 			fi		
 		fi
 	else
-		echo 'ERROR: Can not get latest "'"${proxy_name}"'" version.'
+		echo '# ERROR: Can not get latest "'"${proxy_name}"'" version.'
 	fi
 	
 	if [[ -f "${proxy_path}/${proxy_name}" ]]; then
@@ -240,7 +269,7 @@ function _proxy {
 			
 			tmux has-session -t "${proxy_name}" 2>/dev/null
 			if [ ! "$?" -eq 0 ] ; then
-				echo 'ERROR: Can not start "'"${proxy_name}"'" tmux session.'
+				echo '# ERROR: Can not start "'"${proxy_name}"'" tmux session.'
 			fi
 		fi
 	fi
@@ -265,7 +294,7 @@ function _service_enable {
 		
 		systemctl is-enabled --quiet "${service}"
 		if [[ ! "${?}" -eq 0 ]]; then
-			echo 'ERROR: Service "'"${service}"'" is not enabled.'
+			echo '# ERROR: Service "'"${service}"'" is not enabled.'
 			exit 1
 		fi
 	fi
@@ -315,7 +344,7 @@ function _ntp {
 		sudo systemctl restart chronyd
 	fi
 	if [[ ! -z "${timentp}" ]] || [[ ! -z  "${timeutc}" ]] || [[ ! -z  "${timesyn}" ]]; then
-		echo "ERROR: NTP not active or not synchronized."
+		echo "# ERROR: NTP not active or not synchronized."
 	fi
 }
 
@@ -335,7 +364,7 @@ function _autostart {
 		printf "${string}" > "${autostart}"
 		
 		if [[ ! -f "${autostart}" ]]; then
-			echo 'ERROR: '"${autostart}"' does not exist.'
+			echo '# ERROR: '"${autostart}"' does not exist.'
 			exit 1
 		fi
 	fi
@@ -344,12 +373,16 @@ function _autostart {
 
 	string=''
 	string+='-----\n'
-	string+='Starting freqtrade bots...\n'
-	string+='+ Type "tmux a" to attach to latest TMUX session.\n'
-	string+='+ Use "ctrl+b s" to switch between TMUX sessions.\n'
-	string+='+ Use "ctrl+b d" to return to shell.\n'
+	string+='# Starting FREQTRADE bots...\n'
+	string+='-----\n'
+	string+='# Type "tmux a" to attach to latest TMUX session.\n'
+	string+='# Use "ctrl+b s" to switch between TMUX sessions.\n'
+	string+='# Use "ctrl+b d" to return to shell.\n'
+	string+='# Type "'"${scriptname}"' -k" to disable all bots and service.\n'
 	string+='-----\n'
 	printf -- "${string}"
+	
+	_stats
 	
 	local count=0
 	for bot in "${bots[@]}"; do		
@@ -359,9 +392,10 @@ function _autostart {
 			local botname=$(echo "${bot}" | grep -o -E 'sqlite(.*)sqlite' | sed 's#.sqlite##' | sed 's#sqlite:///##')
 			
 			string=''
-			string+='FREQTRADE:\n'
-			string+=''"${bot}"'\n'
-			string+='\n'
+			string+='# FREQTRADE:\n'
+			string+='-\n'
+			string+='# '"${bot}"'\n'
+			string+='-\n'
 			printf -- "${string}"  
 
 			set -f; local arguments=("${bot}") #https://stackoverflow.com/a/15400047
@@ -379,28 +413,28 @@ function _autostart {
 			done
 			
 			if [[ -z "${botname}" ]]; then
-				echo 'ERROR: Override trades database URL.'
+				echo '# ERROR: Override trades database URL.'
 				local error=1
 			fi
 			
 			if [[ "${botname}" =~ ['!@#$%^&*()_+.'] ]]; then
-				echo 'ERROR: Do not use special characters in database URL name.'
+				echo '# ERROR: Do not use special characters in database URL name.'
 				local error=1
 			fi
 			
 			if [[ -z $(echo "${bot}" | grep -e '--strategy-path=') ]]; then
-				echo "ERROR: --strategy-path is missing."
+				echo "# ERROR: --strategy-path is missing."
 				local error=1
 			fi
 			
 			if [[ -z $(echo "${bot}" | grep -e '--strategy=') ]]; then
-				echo "ERROR: --strategy is missing."
+				echo "# ERROR: --strategy is missing."
 				local error=1
 			fi
 						
 			tmux has-session -t "${botname}" 2>/dev/null
 			if [ "$?" -eq 0 ] ; then
-				echo 'ERROR: "'"${botname}"'" already active. Rename database URL name!'
+				echo '# ERROR: Sqlite "'"${botname}"'" already active. Rename database URL name!'
 				local count=$((count+1))
 				local error=1
 			fi
@@ -415,7 +449,7 @@ function _autostart {
 				sudo tmux has-session -t "${botname}" 2>/dev/null
 				if [ "$?" -eq 0 ] ; then
 					local count=$((count+1))
-					echo 'INFO: Freqtrade "'"${botname}"'" started.'
+					echo '# INFO: Freqtrade "'"${botname}"'" started.'
 				fi
 			fi
 			
@@ -424,9 +458,9 @@ function _autostart {
 	done
 	
 	if [[ "${count}" == 0 ]]; then
-		echo 'WARNING: No freqtrate active bots found. Edit "'"${autostart}"'" file.'
+		echo '# WARNING: No freqtrate active bots found. Edit "'"${autostart}"'" file.'
 	else
-		echo 'INFO: There are "'"${count}"'" active freqtrade bots.'
+		echo '# INFO: There are "'"${count}"'" active freqtrade bots.'
 	fi
 	echo '-----'
 }
@@ -438,7 +472,7 @@ function _kill {
 		sleep 0.1
 	done
 	_service_disable
-	echo "INFO: All bots stopped and restart service disabled."
+	echo "# INFO: All bots stopped and restart service disabled."
 }
 
 function _start {
@@ -446,6 +480,20 @@ function _start {
 	_freqtrade
 	_service
 	_autostart
+}
+
+function _stats {
+	local ping=$(ping -c 1 -w15 api3.binance.com | awk -F '/' 'END {print $5}')
+	local mem_free=$(free -m | awk 'NR==2{print $4}')
+	local mem_total=$(free -m | awk 'NR==2{print $2}')
+	local time=$((time curl -X GET "https://api.binance.com/api/v3/exchangeInfo?symbol=BNBBTC") 2>&1 > /dev/null \
+		| grep -o 'real.*s' \
+		| sed 's#real	##')
+	echo '# Ping avg. (Binance): '"${ping}"'ms | Vultr "Tokyo" Server avg.: 1.290ms'
+	echo '# Time to API (Binance): '"${time}"' | Vultr "Tokyo" Server avg.: 0m0.039s'
+	echo '# Free memory (Server): '"${mem_free}"'MB from '"${mem_total}"'MB | Vultr "Tokyo" Server avg.: 2 bots with 77MB free memory (1GB)'
+	echo '# Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free: https://www.vultr.com/?ref=9122650-8H'
+	echo '-----'
 }
 
 if [[ ! -z "$*" ]]; then
@@ -458,11 +506,11 @@ if [[ ! -z "$*" ]]; then
 				_kill
 			;;
 			-*|--*)
-				echo_block "ERROR: Unknown option ${i}"
+				echo_block "# ERROR: Unknown option ${i}"
 				exit 1
 			;;
 			*)
-				echo_block "ERROR: Unknown option ${i}"
+				echo_block "# ERROR: Unknown option ${i}"
 				exit 1
 			;;
 		esac
