@@ -66,17 +66,23 @@ function _freqtrade {
 					wget -qO- "${git_url}" \
 						| tar xz -C "${path_new}" --strip-components=1
 					if [[ -f "${path_new}/setup.sh" ]]; then
+						local path="${path_new}"
+
 						echo 'INFO: New "'"${name}"'" version "'"${git_version}"'" has been downloaded.'
 						sudo chmod +x "${path_new}/setup.sh"
-						$(cd "${path_new}"; \
-							source .env/bin/activate 2>/dev/null; \
-							yes $'no' | sudo ./setup.sh -i)
-						$(cd "${path_new}"; \
-						source .env/bin/activate 2>/dev/null; \
-						pip install pandas-ta; \
-						deactivate)
 						
-						local path="${path_new}"
+						echo 'INFO: Installing "'"${name}"'" may take some time...'
+						cd "${path_new}"
+						yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
+							
+						echo 'INFO: Installing "pandas-ta" may take some time...'
+						cd "${path_new}"
+						python3 -m venv .env >/dev/null 2>&1
+						source .env/bin/activate
+						python3 -m pip install --upgrade pip >/dev/null 2>&1
+						python3 -m pip install -e . >/dev/null 2>&1
+						pip install pandas-ta >/dev/null 2>&1
+						deactivate
 					fi
 				else
 					echo 'ERROR: Latest "'"${name}"'" file does not exist.'
@@ -91,7 +97,8 @@ function _freqtrade {
 		source .env/bin/activate 2>/dev/null; \
 		command -v freqtrade) ]]; then
 		
-		echo "ERROR: Freqtrade not installed."
+		echo "ERROR: Freqtrade not successfully installed. Restart script and try again."
+		sudo rm -rf "${path}"
 		exit 1		
 	fi
 }
