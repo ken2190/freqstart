@@ -1,7 +1,7 @@
 <div id="top"></div>
 
 <!-- FREQSTART -->
-# freqstart
+# FREQSTART
 
 Freqstart simplifies the usage of freqtrade with NostalgiaForInfinity strategies.
 Just copy your commands into a text file and freqstart will take care of the rest.
@@ -30,6 +30,10 @@ If you are not familiar with freqtrade, please read the complete documentation f
 
 `WARNING:` Freqstart automatically installs packages and server configurations tailored to freqtrade's needs. It is recommended to set it up in a new and clean environment!
 
+This project is beeing developed and testet on Vultr "Tokyo" Server with Debian.
+
+Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free: [https://www.vultr.com/?ref=9122650-8H](https://www.vultr.com/?ref=9122650-8H)
+
 ### Installation
 
 1. Clone the repo
@@ -48,6 +52,29 @@ If you are not familiar with freqtrade, please read the complete documentation f
    ```sh
    ./freqstart.sh
    ```
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- ROADMAP -->
+## Roadmap
+
+- [ ] Automated setup of FreqUI.
+- [ ] Rewrite strategy function for more flexibility.
+- [ ] etc.
+
+See the [open issues](https://github.com/berndhofer/freqstart/issues) for a full list of proposed features (and known issues).
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- Support -->
+
+## Support
+
+Since this is a small project where I taught myself some bash scripts, you are welcome to improve the code. If you just use the script and like it, remember that it took a lot of time, testing and also money for infrastructure. You can contribute by donating to the following wallets. Thank you very much for that!
+
+* `BTC` 1M6wztPA9caJbSrLxa6ET2bDJQdvigZ9hZ
+* `ETH` 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
+* `BSC` 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
