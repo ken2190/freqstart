@@ -7,12 +7,16 @@ Freqstart simplifies the usage of freqtrade with NostalgiaForInfinity strategies
 Just copy your commands into a text file and freqstart will take care of the rest.
 Freqstart will start your bots in separate TMUX sessions and will try to restart them after a system reboot. 
 
+[![Freqstart Screen Shot][product-screenshot]]
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- DISCLAIMER -->
 ## Disclaimer
  
 This software is for educational purposes only. Do not risk money which you are afraid to lose. USE THE SOFTWARE AT YOUR OWN RISK. THE AUTHORS AND ALL AFFILIATES ASSUME NO RESPONSIBILITY FOR YOUR TRADING RESULTS.
+
+<p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- GETTING STARTED -->
 ## Getting Started
@@ -24,7 +28,7 @@ If you are not familiar with freqtrade, please read the complete documentation f
 
 ### Prerequisites
 
-`WARNING`: Freqstart automatically installs packages and server configurations tailored to freqtrade's needs. It is recommended to set it up in a new and clean environment!
+`WARNING:` Freqstart automatically installs packages and server configurations tailored to freqtrade's needs. It is recommended to set it up in a new and clean environment!
 
 ### Installation
 
@@ -46,3 +50,7 @@ If you are not familiar with freqtrade, please read the complete documentation f
    ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
+
+<!-- MARKDOWN LINKS & IMAGES -->
+<!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
+[product-screenshot]: images/screenshot.png
