@@ -229,7 +229,7 @@ function _proxy {
 		tmux has-session -t "${proxy_name}" 2>/dev/null
 		if [ ! "$?" -eq 0 ] ; then
 			sudo /usr/bin/tmux new -s "${proxy_name}" -d
-			sudo /usr/bin/tmux send-keys -t "${proxy_name}" "exec ${proxy_path}/${proxy_name}" Enter
+			sudo /usr/bin/tmux send-keys -t "${proxy_name}" "exec ${proxy_path}/${proxy_name} -v" Enter
 			
 			tmux has-session -t "${proxy_name}" 2>/dev/null
 			if [ ! "$?" -eq 0 ] ; then
@@ -394,10 +394,12 @@ function _autostart {
 			tmux has-session -t "${botname}" 2>/dev/null
 			if [ "$?" -eq 0 ] ; then
 				echo 'ERROR: "'"${botname}"'" already active. Rename database URL name!'
+				local count=$((count+1))
 				local error=1
 			fi
 
 			if [[ "${error}" -eq 0 ]]; then
+
 				sudo /usr/bin/tmux new -s "${botname}" -d	
 				sudo /usr/bin/tmux send-keys -t "${botname}" "cd ${freqtrade}" Enter
 				sudo /usr/bin/tmux send-keys -t "${botname}" ". .env/bin/activate" Enter
@@ -405,17 +407,17 @@ function _autostart {
 				
 				sudo tmux has-session -t "${botname}" 2>/dev/null
 				if [ "$?" -eq 0 ] ; then
+					local count=$((count+1))
 					echo 'INFO: Freqtrade "'"${botname}"'" started.'
 				fi
 			fi
 			
 			echo '-----'
-			local count=$((count+1))
 		fi
 	done
 	
 	if [[ "${count}" == 0 ]]; then
-		echo 'WARNING: No freqtrate bots found. Edit "'"${autostart}"'" file.'
+		echo 'WARNING: No freqtrate active bots found. Edit "'"${autostart}"'" file.'
 	else
 		echo 'INFO: There are "'"${count}"'" active freqtrade bots.'
 	fi
