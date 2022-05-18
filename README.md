@@ -24,9 +24,7 @@ If you are not familiar with freqtrade, please read the complete documentation f
 
 ### Prerequisites
 
-  ```sh
-  WARNING: Freqstart automatically installs packages and server configurations tailored to freqtrade's needs. It is recommended to set it up in a new and clean environment!
-  ```
+`WARNING`: Freqstart automatically installs packages and server configurations tailored to freqtrade's needs. It is recommended to set it up in a new and clean environment!
 
 ### Installation
 
