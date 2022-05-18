@@ -257,9 +257,6 @@ function _tmux {
 }
 
 function _freqtrade_installed {
-	echo "111path ----- ${path}"
-
-
 	if [[ ! -x $(cd "${path}"; \
 		source .env/bin/activate 2>/dev/null; \
 		command -v freqtrade) ]]; then
@@ -294,11 +291,11 @@ function _freqtrade {
 					
 			_freqtrade_installed
 			if [[ "$?" -eq 1 ]]; then				
-				echo "# ERROR: "'"${path_name}"'" not installed. Restart and try again."
+				echo '# ERROR: "'"${path_name}"'" not installed. Restart and try again.'
 				sudo rm -rf "${path}"
 				exit 1
 			else
-				echo "# INFO: "'"${path_name}"'" installed."
+				echo '# INFO: "'"${path_name}"'" installed.'
 				return 0
 			fi
 		else
