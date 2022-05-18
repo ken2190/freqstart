@@ -13,13 +13,212 @@ clear
 #
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly service='freqstart.service'
+readonly freqtrade_repo="freqtrade/freqtrade"
+readonly nfi_repo="iterativv/NostalgiaForInfinity"
+
+function _hash {
+	echo $(cat /dev/urandom \
+		| tr -dc 'a-zA-Z0-9' \
+		| fold -w 32 \
+		| head -n 1)
+}
+
+function _path {
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+	
+	path="${1}"
+	path_name=$(basename "${path}" | sed 's#_.*##')
+	path_version=$(basename "${path}" | grep -o '_.*' | sed 's#_##')	
+	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
+	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
+	git_repo=$(_git_repo)
+	git_latest='https://api.github.com/repos/'"${git_repo}"'/releases/latest'
+	git_latest_tmp='/tmp/'"${path_name}"'_'"$(_hash)"'.json'
+	git_latest_file=''
+	git_latest_version=''
+	git_archive='https://github.com/'"${git_repo}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
+
+	if [[ ! -z "${git_repo}" ]]; then
+		if [[ ! -z "${path_version}" ]]; then
+			_git_archive
+			if [[ "$?" -eq 0 ]]; then
+				return 0
+			else
+				return 1
+			fi
+		else
+			_git_latest
+			if [[ "$?" -eq 0 ]]; then
+				return 0
+			else
+				return 1
+			fi
+		fi
+	else
+		echo '# ERROR: "'"${path_name}"'" git repo not found.'
+		return 1
+	fi
+}
+
+function _git_repo {
+	if [[ "${path_name}" == 'NostalgiaForInfinity' ]]; then
+		echo "${nfi_repo}"
+	elif [[ "${path_name}" == 'freqtrade' ]]; then
+		echo "${freqtrade_repo}"
+	else
+		echo ''
+	fi
+}
 
 function _git_validate {
-  if [[ $(wget -S --spider $1 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
-    return 0
-  else
-    return 1
-  fi
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+	local file="${1}"
+	if [[ $(wget -S --spider "${file}" 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+function _git_download {
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+	
+	local file="${1}"
+
+	_git_validate "${file}"
+	if [[ "$?" -eq 0 ]]; then
+		echo "file ------ ${file}"
+		if [[ ! -z "${git_latest_version}" ]]; then
+			path_version="${git_latest_version}"
+		fi
+		
+		path="${scriptpath}"'/'"${path_name}"'_'"${path_version}"
+
+		mkdir -p "${path}"
+		wget -qO- "${file}" \
+			| tar xz -C "${path}" --strip-components=1
+			
+			if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
+				return 0
+			else
+				rm -rf "${path}"
+				return 1
+			fi
+	else
+		echo '# ERROR: "'"${path_name}"'" version "'"${path_version}"'" does not exist.'
+		return 1
+	fi
+}
+
+function _git_archive {
+	if [[ ! -d "${path}" ]]; then
+		_git_download "${git_archive}"
+		if [[ "$?" -eq 0 ]]; then
+			echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
+			return 0
+		else
+			echo '# ERROR: "'"${path_name}"'" version "'"${path_version}"'" not downloaded.'
+			return 1
+		fi
+	else
+		echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
+		return 0
+	fi
+}
+
+function _git_latest_version {
+	git_latest_version=$(cat "${git_latest_tmp}" \
+		| grep -o '"tag_name": ".*"' \
+		| sed 's/"tag_name": "//' \
+		| sed 's/"//')
+		
+	if [[ ! -z "${git_latest_version}" ]] && [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+function _git_latest_tmp {
+	curl -o "${git_latest_tmp}" -s -L "${git_latest}"
+	if [[ -f "${git_latest_tmp}" ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+function _git_latest {
+	_git_latest_tmp
+	if [[ "$?" -eq 0 ]]; then
+		_git_latest_version
+		if [[ "$?" -eq 0 ]]; then
+			_git_latest_file
+			if [[ "$?" -eq 0 ]]; then
+				_git_download "${git_latest_file}"
+				if [[ "$?" -eq 0 ]]; then
+					echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" downloaded.'
+					return 0
+				else
+					echo '# ERROR: "'"${path_name}"'" latest version "'"${git_latest_version}"'" not downloaded.'
+					return 1
+				fi
+			else
+				echo '# ERROR: "'"${path_name}"'" latest version "'"${git_latest_version}"'" file not found.'
+				return 1
+			fi
+		else
+			echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
+			return 0
+		fi
+	else
+		echo '# ERROR: "'"${path_name}"'" latest version "'"${git_latest_version}"'" not found.'
+		return 1
+	fi
+}
+
+function _git_latest_file {
+	local browser_download_url=$(cat "${git_latest_tmp}" \
+		| grep -o -E '"browser_download_url": "(.*)Linux_x86_64.tar.gz"' \
+		| sed 's/"browser_download_url": "//' \
+		| sed 's/"//')
+	local tarball_url=$(cat "${git_latest_tmp}" \
+		| grep -o '"tarball_url": ".*"' \
+		| sed 's/"tarball_url": "//' \
+		| sed 's/"//')
+	
+	if [[ ! -z "${browser_download_url}" ]]; then
+		git_latest_file="${browser_download_url}"
+	else
+		git_latest_file="${tarball_url}"
+	fi
+		
+	_git_validate "${git_latest_file}"
+	if [[ "$?" -eq 0 ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+
+
+
+
+
+function _strategy {
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+	
+	local strategy="${1}"
+	
+	if [[ ! -z $(echo "${strategy}" | grep -e '--strategy-path=') ]]; then
+		_path "${strategy}"
+		if [[ "$?" -eq 0 ]]; then
+			return 0
+		else
+			return 1
+		fi
+	fi
 }
 
 function _env_deactivate {
@@ -57,67 +256,56 @@ function _tmux {
 	fi
 }
 
-function _freqtrade {
-	local name="freqtrade"
-	local path=$(ls -d "${scriptpath}"/"${name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
-	local path_new=''
-	local version=$(basename "${path}" | sed 's#.*_##')
-	local installed=''
-	local git_latest="https://api.github.com/repos/freqtrade/freqtrade/releases/latest"
-	local git_version=$(curl -s "${git_latest}" | grep -o '"tag_name": ".*"' \
-		| sed 's/"tag_name": "//' \
-		| sed 's/"//')
-	local git_url=''
-	
-	if [[ ! -z "${git_version}" ]]; then
-		if [[ "${git_version}" != "${version}" ]]; then
-			local path_new="${scriptpath}/${name}_${git_version}"
-			if [[ ! -d "${path_new}" ]]; then
-				local git_url=$(curl -s "${git_latest}" \
-					| grep -o '"tarball_url": ".*"' \
-					| sed 's/"tarball_url": "//' \
-					| sed 's/"//')
+function _freqtrade_installed {
+	echo "111path ----- ${path}"
 
-				if _git_validate "${git_url}"; then
-					mkdir -p "${path_new}"
-					wget -qO- "${git_url}" \
-						| tar xz -C "${path_new}" --strip-components=1
-					if [[ -f "${path_new}/setup.sh" ]]; then
-						local path="${path_new}"
 
-						echo '# INFO: New "'"${name}"'" version "'"${git_version}"'" has been downloaded.'
-						sudo chmod +x "${path_new}/setup.sh"
-						
-						echo '# INFO: Installing "'"${name}"'" may take some time...'
-						cd "${path_new}"
-						yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
-							
-						echo '# INFO: Installing "pandas-ta" may take some time...'
-						cd "${path_new}"
-						_env_deactivate
-						python3 -m venv .env >/dev/null 2>&1
-						source .env/bin/activate
-						python3 -m pip install --upgrade pip >/dev/null 2>&1
-						python3 -m pip install -e . >/dev/null 2>&1
-						pip install pandas-ta >/dev/null 2>&1
-						_env_deactivate
-					fi
-				else
-					echo '# ERROR: Latest "'"${name}"'" file does not exist.'
-				fi
-			fi		
-		fi
-	else
-		echo '# ERROR: Can not get latest "'"${name}"'" version.'
-	fi
-	
 	if [[ ! -x $(cd "${path}"; \
 		source .env/bin/activate 2>/dev/null; \
 		command -v freqtrade) ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+function _freqtrade {
+	_path 'freqtrade'
+	if [[ "$?" -eq 0 ]]; then
 		
-		echo "# ERROR: Freqtrade not successfully installed. Restart script and try again."
-		sudo rm -rf "${path}"
-		exit 1		
+		_freqtrade_installed
+		if [[ "$?" -eq 1 ]]; then
+
+			sudo chmod +x "${path}/setup.sh"
+			
+			echo '# INFO: Installing "'"${path_name}"'" may take some time...'
+			cd "${path}"
+			yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
+				
+			echo '# INFO: Installing "pandas-ta" may take some time...'
+			cd "${path}"
+			_env_deactivate
+			python3 -m venv .env >/dev/null 2>&1
+			source .env/bin/activate
+			python3 -m pip install --upgrade pip >/dev/null 2>&1
+			python3 -m pip install -e . >/dev/null 2>&1
+			pip install pandas-ta >/dev/null 2>&1
+			_env_deactivate
+					
+			_freqtrade_installed
+			if [[ "$?" -eq 1 ]]; then				
+				echo "# ERROR: "'"${path_name}"'" not installed. Restart and try again."
+				sudo rm -rf "${path}"
+				exit 1
+			else
+				echo "# INFO: "'"${path_name}"'" installed."
+				return 0
+			fi
+		else
+			return 0
+		fi
+	else
+		exit 1
 	fi
 }
 
@@ -131,6 +319,8 @@ function _config {
 		if [[ ! -f "${config}" ]]; then
 			echo '# ERROR: Config "'"${config}"'" not found.'
 			return 1
+		else
+			return 0
 		fi
 	fi
 }
@@ -406,7 +596,7 @@ function _autostart {
 					local error=1
 				fi
 				
-				_nfi "${argument}"
+				_strategy "${argument}"
 				if [ "$?" -eq 1 ] ; then
 					local error=1
 				fi
@@ -444,7 +634,7 @@ function _autostart {
 				sudo /usr/bin/tmux new -s "${botname}" -d	
 				sudo /usr/bin/tmux send-keys -t "${botname}" "cd ${freqtrade}" Enter
 				sudo /usr/bin/tmux send-keys -t "${botname}" ". .env/bin/activate" Enter
-				sudo /usr/bin/tmux send-keys -t "${botname}" "exec ${bot}" Enter
+				#sudo /usr/bin/tmux send-keys -t "${botname}" "exec ${bot}" Enter
 				
 				sudo tmux has-session -t "${botname}" 2>/dev/null
 				if [ "$?" -eq 0 ] ; then
@@ -478,8 +668,8 @@ function _kill {
 function _start {
 	_apt
 	_freqtrade
-	_service
-	_autostart
+	#_service
+	#_autostart
 }
 
 function _stats {
