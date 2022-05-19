@@ -579,11 +579,7 @@ function _autostart {
 }
 
 function _kill {
-<<<<<<< Updated upstream
-	tmux kill-session -t 'binance-proxy'
-=======
 	tmux kill-session -t "${proxy}"
->>>>>>> Stashed changes
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
 		#https://unix.stackexchange.com/a/568928 
 		tmux list-panes -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c &
