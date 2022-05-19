@@ -14,12 +14,212 @@ clear
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly service='freqstart.service'
 
+readonly freqtrade_repo=('freqtrade' 'freqtrade/freqtrade')
+readonly nfi_repo=('NostalgiaForInfinity' 'iterativv/NostalgiaForInfinity')
+readonly proxy_repo=('binance-proxy' 'nightshift2k/binance-proxy')
+
+readonly git_repos=(
+  freqtrade_repo[@]
+  nfi_repo[@]
+  proxy_repo[@]
+)
+
+function _hash {
+	echo $(cat /dev/urandom \
+		| tr -dc 'a-zA-Z0-9' \
+		| fold -w 32 \
+		| head -n 1)
+}
+
+function _path {
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+	
+	path="${1}"
+	if [[ -z $(echo "${path}" | grep -o '/') ]]; then
+		path="${scriptpath}"'/'"${path}"
+	fi
+	path_name=$(basename "${path}" | sed 's#_.*##')
+	path_version=$(basename "${path}" | grep -o '_.*' | sed 's#_##')	
+	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
+	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
+
+	_git_repo
+	if [[ "$?" -eq 0 ]]; then
+		if [[ ! -z "${path_version}" ]]; then
+			_git_archive
+			if [[ "$?" -eq 0 ]]; then
+				return 0
+			else
+				return 1
+			fi
+		else
+			_git_latest
+			if [[ "$?" -eq 0 ]]; then
+				return 0
+			else
+				return 1
+			fi
+		fi
+	else
+		echo '# ERROR: "'"${path_name}"'" git repo not found.'
+		return 1
+	fi
+}
+
+function _git_repo {
+	local count=${#git_repos[@]}
+	for ((i=0; i<$count; i++)); do
+		local git_name=${!git_repos[i]:0:1}
+		local git_value=${!git_repos[i]:1:1}
+
+		if [[ "${path_name}" == "${git_name}" ]]; then
+			git_latest='https://api.github.com/repos/'"${git_value}"'/releases/latest'
+			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_hash)"'.json'
+			git_latest_file=''
+			git_latest_version=''
+			git_archive='https://github.com/'"${git_value}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
+			
+			return 0
+		fi
+	done
+}
+
 function _git_validate {
-  if [[ $(wget -S --spider $1 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
-    return 0
-  else
-    return 1
-  fi
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+	local file="${1}"
+	if [[ $(wget -S --spider "${file}" 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+function _git_download {
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+	
+	local file="${1}"
+
+	_git_validate "${file}"
+	if [[ "$?" -eq 0 ]]; then
+		mkdir -p "${path}"
+		wget -qO- "${file}" \
+			| tar xz -C "${path}" --strip-components=1
+			
+			if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
+				echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
+				return 0
+			else
+				echo '# ERROR: "'"${path_name}"'" version "'"${path_version}"'" download failed. Restart script!'
+				rm -rf "${path}"
+				exit 1
+			fi
+	else
+		echo '# ERROR: "'"${path_name}"'" version "'"${path_version}"'" does not exist.'
+		return 1
+	fi
+}
+
+function _git_archive {
+	if [[ ! -d "${path}" ]]; then
+		_git_download "${git_archive}"
+	else
+		#echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
+		return 0
+	fi
+}
+
+function _git_latest_version {
+	git_latest_version=$(cat "${git_latest_tmp}" \
+		| grep -o '"tag_name": ".*"' \
+		| sed 's/"tag_name": "//' \
+		| sed 's/"//')
+	if [[ ! -z "${git_latest_version}" ]]; then
+		path="${path}"'_'"${git_latest_version}"
+		
+		if [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
+			return 0
+		else
+			return 1
+		fi
+	else
+		return 1
+	fi
+}
+
+function _git_latest_tmp {
+	curl -o "${git_latest_tmp}" -s -L "${git_latest}"
+	if [[ -f "${git_latest_tmp}" ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+function _git_latest {
+	_git_latest_tmp
+	if [[ "$?" -eq 0 ]]; then
+		_git_latest_version
+		if [[ "$?" -eq 0 ]]; then
+			_git_latest_file
+			if [[ "$?" -eq 0 ]]; then
+				_git_download "${git_latest_file}"
+				if [[ "$?" -eq 0 ]]; then
+					echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" downloaded.'
+					return 0
+				else
+					echo '# ERROR: "'"${path_name}"'" latest version "'"${git_latest_version}"'" not downloaded.'
+					return 1
+				fi
+			else
+				echo '# ERROR: "'"${path_name}"'" latest version "'"${git_latest_version}"'" file not found.'
+				return 1
+			fi
+		else
+			#echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
+			return 0
+		fi
+	else
+		echo '# ERROR: "'"${path_name}"'" latest version "'"${git_latest_version}"'" not found.'
+		return 1
+	fi
+}
+
+function _git_latest_file {
+	local browser_download_url=$(cat "${git_latest_tmp}" \
+		| grep -o -E '"browser_download_url": "(.*)Linux_x86_64.tar.gz"' \
+		| sed 's/"browser_download_url": "//' \
+		| sed 's/"//')
+	local tarball_url=$(cat "${git_latest_tmp}" \
+		| grep -o '"tarball_url": ".*"' \
+		| sed 's/"tarball_url": "//' \
+		| sed 's/"//')
+	
+	if [[ ! -z "${browser_download_url}" ]]; then
+		git_latest_file="${browser_download_url}"
+	else
+		git_latest_file="${tarball_url}"
+	fi
+		
+	_git_validate "${git_latest_file}"
+	if [[ "$?" -eq 0 ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+function _strategy {
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+
+	local strategy=$(echo "${1}" | grep -e '--strategy-path=.*' | sed 's#--strategy-path=##')
+	if [[ ! -z "${strategy}" ]]; then
+		_path "${strategy}"
+		if [[ "$?" -eq 0 ]]; then
+			return 0
+		else
+			return 1
+		fi
+	fi
 }
 
 function _env_deactivate {
@@ -45,79 +245,51 @@ function _apt {
 	fi
 }
 
-function _tmux {
-	if [[ ! -x "$(command -v tmux)" ]]; then
-		sudo apt-get update -y >/dev/null
-		sudo apt-get install -y tmux >/dev/null
-		
-		if [[ ! -x "$(command -v tmux)" ]]; then
-			echo "# ERROR: TMUX not installed."
-			exit 1
-		fi
+function _freqtrade_installed {
+	if [[ ! -z $(cd "${path}"; source .env/bin/activate 2>/dev/null; freqtrade --version 2>/dev/null | sed 's/freqtrade //') ]]; then
+		return 0
+	else
+		return 1
 	fi
 }
 
 function _freqtrade {
-	local name="freqtrade"
-	local path=$(ls -d "${scriptpath}"/"${name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
-	local path_new=''
-	local version=$(basename "${path}" | sed 's#.*_##')
-	local installed=''
-	local git_latest="https://api.github.com/repos/freqtrade/freqtrade/releases/latest"
-	local git_version=$(curl -s "${git_latest}" | grep -o '"tag_name": ".*"' \
-		| sed 's/"tag_name": "//' \
-		| sed 's/"//')
-	local git_url=''
-	
-	if [[ ! -z "${git_version}" ]]; then
-		if [[ "${git_version}" != "${version}" ]]; then
-			local path_new="${scriptpath}/${name}_${git_version}"
-			if [[ ! -d "${path_new}" ]]; then
-				local git_url=$(curl -s "${git_latest}" \
-					| grep -o '"tarball_url": ".*"' \
-					| sed 's/"tarball_url": "//' \
-					| sed 's/"//')
+	_path 'freqtrade'
+	if [[ "$?" -eq 0 ]]; then
+		_freqtrade_installed
+		if [[ "$?" -eq 1 ]]; then
 
-				if _git_validate "${git_url}"; then
-					mkdir -p "${path_new}"
-					wget -qO- "${git_url}" \
-						| tar xz -C "${path_new}" --strip-components=1
-					if [[ -f "${path_new}/setup.sh" ]]; then
-						local path="${path_new}"
-
-						echo '# INFO: New "'"${name}"'" version "'"${git_version}"'" has been downloaded.'
-						sudo chmod +x "${path_new}/setup.sh"
-						
-						echo '# INFO: Installing "'"${name}"'" may take some time...'
-						cd "${path_new}"
-						yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
-							
-						echo '# INFO: Installing "pandas-ta" may take some time...'
-						cd "${path_new}"
-						_env_deactivate
-						python3 -m venv .env >/dev/null 2>&1
-						source .env/bin/activate
-						python3 -m pip install --upgrade pip >/dev/null 2>&1
-						python3 -m pip install -e . >/dev/null 2>&1
-						pip install pandas-ta >/dev/null 2>&1
-						_env_deactivate
-					fi
-				else
-					echo '# ERROR: Latest "'"${name}"'" file does not exist.'
-				fi
-			fi		
+			sudo chmod +x "${path}/setup.sh"
+			
+			echo '# INFO: Installing "'"${path_name}"'" may take some time, please be patient...'
+			cd "${path}"
+			yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
+				
+			echo '# INFO: Installing "pandas-ta" may take some time, please be patient...'
+			cd "${path}"
+			_env_deactivate
+			python3 -m venv .env >/dev/null 2>&1
+			source .env/bin/activate
+			python3 -m pip install --upgrade pip >/dev/null 2>&1
+			python3 -m pip install -e . >/dev/null 2>&1
+			pip install pandas-ta >/dev/null 2>&1
+			_env_deactivate
+					
+			_freqtrade_installed
+			if [[ "$?" -eq 1 ]]; then				
+				sudo rm -rf "${path}"
+				echo '# ERROR: "'"${path_name}"'" not installed. Restart script!'
+				exit 1
+			else
+				echo '# INFO: "'"${path_name}"'" install finished.'
+				return 0
+			fi
+		else
+			#echo '# INFO: "'"${path_name}"'" is already installed.'
+			return 0
 		fi
 	else
-		echo '# ERROR: Can not get latest "'"${name}"'" version.'
-	fi
-	
-	if [[ ! -x $(cd "${path}"; \
-		source .env/bin/activate 2>/dev/null; \
-		command -v freqtrade) ]]; then
-		
-		echo "# ERROR: Freqtrade not successfully installed. Restart script and try again."
-		sudo rm -rf "${path}"
-		exit 1		
+		return 1
 	fi
 }
 
@@ -131,75 +303,37 @@ function _config {
 		if [[ ! -f "${config}" ]]; then
 			echo '# ERROR: Config "'"${config}"'" not found.'
 			return 1
-		fi
-	fi
-}
-
-function _nfi {
-	if [[ "${#}" -eq 0 ]]; then exit 1; fi
-	
-	local nfi="${1}"
-	
-	if [[ ! -z $(echo "${nfi}" | grep -e '--strategy-path=') ]]; then
-		local nfi_name='NostalgiaForInfinity'
-		local nfi_path=$(echo "${nfi}" | sed 's#--strategy-path=##')
-		local nfi_version=$(basename "${nfi_path}" | sed 's#.*_##')
-		local nfi_git="https://github.com/iterativv/NostalgiaForInfinity/archive/refs/tags/${nfi_version}.tar.gz"
-		local nfi_latest="https://api.github.com/repos/iterativv/NostalgiaForInfinity/releases/latest"
-		
-		if [[ ! -z $(echo "${nfi}" | grep -o -E '.*'"${nfi_name}"'.*') ]]; then
-			local nfi_latest_version=$(curl -s "${nfi_latest}" | grep -o '"tag_name": ".*"' \
-				| sed 's/"tag_name": "//' \
-				| sed 's/"//')
-
-			if [[ ! -z "${nfi_version}" ]]; then
-				if [[ ! -d "${nfi_path}" || -z "$(ls -A ${nfi_path})" ]]; then
-					if _git_validate "${nfi_git}"; then
-						mkdir -p "${nfi_path}"
-						wget -qO- "${nfi_git}" \
-							| tar xz -C "${nfi_path}" --strip-components=1
-						if [[ -d "${nfi_path}" || ! -z "$(ls -A ${nfi_path})" ]]; then
-							echo '# INFO: Strategy "'"${nfi_version}"'" has been downloaded.'
-						fi
-					else
-						echo '# ERROR: Strategy "'"${nfi_version}"'" not found. Try latest "'"${nfi_latest_version}"'" version.'
-						return 1
-					fi
-				fi
-			else
-				echo '# ERROR: Strategy version is not set. Example: NostalgiaForInfinity_v00.0.000'
-				return 1
-			fi
-			
-			if [[ ! -z "${nfi_latest_version}" ]]; then
-				if [[ "${nfi_latest_version}" != "${nfi_version}" ]]; then
-					echo '# INFO: Newer strategy "'"${nfi_latest_version}"'" available. Always test new strategy versions first!'
-				fi
-			else
-				echo '# WARNING: Can not get latest strategy version.'
-			fi
 		else
-			if [[ ! -d "${nfi_path}" ]]; then
-				echo '# ERROR: Strategy "'"${nfi_path}"'" not found.'
-				return 1
-			else
-				echo '# INFO: Strategy does not contain "'"${nfi_name}"'" and must be manually verified.'
-			fi
+			return 0
 		fi
 	fi
 }
 
-function _proxy {
-	local proxy_name="binance-proxy"
-	local proxy_path=$(ls -d "${scriptpath}"/"${proxy_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
-	local proxy_new_path=''
-	local proxy_version=$(basename "${proxy_path}" | sed 's#.*_##')
-	local git_latest="https://api.github.com/repos/nightshift2k/binance-proxy/releases/latest"
-	local git_version=$(curl -s "${git_latest}" | grep -o '"tag_name": ".*"' \
-		| sed 's/"tag_name": "//' \
-		| sed 's/"//')
-	local git_url=''
+function _tmux {
+	if [[ ! -x "$(command -v tmux)" ]]; then
+		sudo apt-get update -y >/dev/null
+		sudo apt-get install -y tmux >/dev/null
+		
+		if [[ ! -x "$(command -v tmux)" ]]; then
+			echo "# ERROR: TMUX not installed."
+			exit 1
+		fi
+	fi
+}
 
+function _tmux_session {
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+	_tmux
+
+	tmux has-session -t "${1}" 2>/dev/null
+	if [[ "$?" -eq 0 ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+function _proxy_json {
 	if [[ ! -f "${scriptpath}/proxy.json" ]]; then
 		string=$(cat <<-END
 			{
@@ -224,54 +358,55 @@ function _proxy {
 		printf "${string}" > "${scriptpath}/proxy.json";
 		
 		if [[ ! -f "${scriptpath}/proxy.json" ]]; then
-			echo '# WARNING: Proxy config does not exist.'
-		fi
-	fi
-
-	if [[ ! -z "${git_version}" ]]; then
-		if [[ "${git_version}" != "${proxy_version}" ]]; then
-			local proxy_new_path="${scriptpath}/${proxy_name}_${git_version}"
-			if [[ ! -d "${proxy_new_path}" ]]; then
-				local git_url=$(curl -s "${git_latest}" \
-					| grep -o -E '"browser_download_url": "(.*)Linux_x86_64.tar.gz"' \
-					| sed 's/"browser_download_url": "//' \
-					| sed 's/"//')
-				if _git_validate "${git_url}"; then
-					mkdir -p "${proxy_new_path}"
-					wget -qO- "${git_url}" \
-						| tar xz -C "${proxy_new_path}"
-					if [[ -f "${proxy_new_path}/${proxy_name}" ]]; then
-						echo '# INFO: New proxy "'"${git_version}"'" has been downloaded.'
-
-						sudo chmod +x "${proxy_new_path}/${proxy_name}"
-						local proxy_path="${proxy_new_path}"
-						
-						tmux has-session -t "${proxy_name}" 2>/dev/null
-						if [ "$?" -eq 0 ] ; then
-							tmux kill-session -t "${proxy_name}"
-							echo '# WARNING: Restarting "'"${proxy_name}"'" tmux session. Review all running bots!'
-						fi
-					fi
-				else
-					echo '# ERROR: Can not download latest "'"${proxy_name}"'" file.'
-				fi
-			fi		
+			echo '# ERROR: Can not create "'"${path_name}"'" config.'
+			exit 1
+		else
+			echo '# INFO: "'"${path_name}"'" config created.'
+			return 0
 		fi
 	else
-		echo '# ERROR: Can not get latest "'"${proxy_name}"'" version.'
+		#echo '# INFO: "'"${path_name}"'" config found.'
+		return 0
 	fi
-	
-	if [[ -f "${proxy_path}/${proxy_name}" ]]; then
-		tmux has-session -t "${proxy_name}" 2>/dev/null
-		if [ ! "$?" -eq 0 ] ; then
-			sudo /usr/bin/tmux new -s "${proxy_name}" -d
-			sudo /usr/bin/tmux send-keys -t "${proxy_name}" "exec ${proxy_path}/${proxy_name} -v" Enter
+}
+
+function _proxy_tmux {
+	_tmux_session "${path_name}"
+	if [[ "$?" -eq 1 ]]; then
+		sudo /usr/bin/tmux new -s "${path_name}" -d
+		sudo /usr/bin/tmux send-keys -t "${path_name}" "exec ${path}/${path_name} -v" Enter
+		_tmux_session "${path_name}"
+		if [[ "$?" -eq 1 ]]; then
+			echo '# ERROR: Can not start "'"${path_name}"'" tmux session.'
+			return 1
+		else
+			echo '# INFO: New "'"${path_name}"'" tmux session startet.'
+			return 0
+		fi
+	else
+		#echo '# INFO: "'"${path_name}"'" tmux session is running.'
+		return 0
+	fi
+}
+
+function _proxy {
+	_path 'binance-proxy'
+	if [ "$?" -eq 0 ] ; then
+		if [[ ! -z "${git_latest_version}" ]] && [[ "${git_latest_version}" != "${path_latest_version}" ]]; then
+			echo '# INFO: New "'"${path_name}"'" "'"${path_version}"'" has been downloaded.'
 			
-			tmux has-session -t "${proxy_name}" 2>/dev/null
-			if [ ! "$?" -eq 0 ] ; then
-				echo '# ERROR: Can not start "'"${proxy_name}"'" tmux session.'
+			if [[ ! -x "${path}"'/'"${path_name}" ]]; then
+				sudo chmod +x "${path}"'/'"${path_name}"
+			fi
+			
+			_tmux_session "${path_name}"
+			if [ "$?" -eq 0 ] ; then
+				echo '# WARNING: Restarting "'"${path_name}"'" tmux session. Review all running bots!'
+				tmux kill-session -t "${path_name}"
 			fi
 		fi
+		_proxy_tmux
+		_proxy_json
 	fi
 }
 
@@ -349,7 +484,6 @@ function _ntp {
 }
 
 function _autostart {
-	_tmux
 	_ntp
 	_proxy
 	
@@ -406,7 +540,7 @@ function _autostart {
 					local error=1
 				fi
 				
-				_nfi "${argument}"
+				_strategy "${argument}"
 				if [ "$?" -eq 1 ] ; then
 					local error=1
 				fi
@@ -444,7 +578,7 @@ function _autostart {
 				sudo /usr/bin/tmux new -s "${botname}" -d	
 				sudo /usr/bin/tmux send-keys -t "${botname}" "cd ${freqtrade}" Enter
 				sudo /usr/bin/tmux send-keys -t "${botname}" ". .env/bin/activate" Enter
-				sudo /usr/bin/tmux send-keys -t "${botname}" "exec ${bot}" Enter
+				#sudo /usr/bin/tmux send-keys -t "${botname}" "exec ${bot}" Enter
 				
 				sudo tmux has-session -t "${botname}" 2>/dev/null
 				if [ "$?" -eq 0 ] ; then
@@ -478,7 +612,7 @@ function _kill {
 function _start {
 	_apt
 	_freqtrade
-	_service
+	#_service
 	_autostart
 }
 
