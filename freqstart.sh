@@ -40,6 +40,7 @@ function _path {
 	
 	path="${1}"
 	if [[ -z $(echo "${path}" | grep -o '/') ]]; then
+		# because we are lazy; set the scriptpath
 		path="${scriptpath}"'/'"${path}"
 	fi
 	path_name=$(basename "${path}" | sed 's#_.*##')
@@ -47,6 +48,7 @@ function _path {
 
 	_git_repo
 	if [[ "$?" -eq 0 ]]; then
+		# if there is a version set, we try to get it from the git archive
 		if [[ ! -z "${path_version}" ]]; then
 			_git_archive
 			if [[ "$?" -eq 0 ]]; then
@@ -55,6 +57,7 @@ function _path {
 				return 1
 			fi
 		else
+		# if there is no version, we grep it from a cached json
 			_git_latest
 			if [[ "$?" -eq 0 ]]; then
 				return 0
@@ -63,6 +66,7 @@ function _path {
 			fi
 		fi
 	else
+		# maybe i add more strategies, should work with any, recommend some
 		echo '# ERROR: "'"${path_name}"'" git repo not found.'
 		return 1
 	fi
@@ -79,6 +83,7 @@ function _git_repo {
 			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_date)"'.json'
 			git_archive='https://github.com/'"${git_value}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
 			
+			# we only return 0; took me 3h why only the first got served
 			return 0
 		fi
 	done
@@ -92,7 +97,7 @@ function _git_archive {
 			rm -rf "${path}"
 			_git_download "${git_archive}"
 		else
-			#echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
+			# less verbose; echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
 			return 0
 		fi
 	fi
@@ -165,15 +170,16 @@ function _git_download {
 		mkdir -p "${path}"
 				
 		if [[ "$(find ${tmp} -maxdepth 1 -printf %y)" = "dd" ]]; then
-			# only one subdir; https://stackoverflow.com/a/32429482
+			# only one subdir, i hate cp; https://stackoverflow.com/a/32429482
 			local tmp_sub=$(find ${tmp} -mindepth 1 -maxdepth 1 -type d)
 			cp -R "${tmp_sub}"/. "${path}"
 		else
 			cp -R "${tmp}"/. "${path}"
 		fi
-
-		rm -rf "${tmp}" # keep tmp clean
-		# switched to 1h checks, rm -f "${git_latest_tmp}" # keep tmp clean
+		
+		# keep tmp clean, save the environment
+		rm -rf "${tmp}"
+		# switched to 1h checks; rm -f "${git_latest_tmp}"
 
 		if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
 			echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
@@ -215,6 +221,7 @@ function _apt {
 		string+='Installed unattended-upgrades. Remove file to update server again.'
 		printf "${string}" > "${scriptpath}/update.txt";
 		
+		# update your environment
 		sudo apt update && \
 		sudo apt -o Dpkg::Options::="--force-confdef" dist-upgrade -y && \
 		sudo apt install -y unattended-upgrades && \
@@ -223,14 +230,6 @@ function _apt {
 		then read -p "A reboot is required to finish installing updates. Press [ENTER] to reboot now, or [CTRL+C] to cancel and reboot later." && \
 		sudo reboot; \
 		else echo "A reboot is not required. Exiting..."; fi
-	fi
-}
-
-function _freqtrade_installed {
-	if [[ ! -z $(cd "${path}"; source .env/bin/activate 2>/dev/null; freqtrade --version 2>/dev/null | sed 's/freqtrade //') ]]; then
-		return 0
-	else
-		return 1
 	fi
 }
 
@@ -266,9 +265,18 @@ function _freqtrade {
 				return 0
 			fi
 		else
-			#echo '# INFO: "'"${path_name}"'" is already installed.'
+			# less verbose; echo '# INFO: "'"${path_name}"'" is already installed.'
 			return 0
 		fi
+	else
+		return 1
+	fi
+}
+
+function _freqtrade_installed {
+	# -x command doesnt work, this does
+	if [[ ! -z $(cd "${path}"; source .env/bin/activate 2>/dev/null; freqtrade --version 2>/dev/null | sed 's/freqtrade //') ]]; then
+		return 0
 	else
 		return 1
 	fi
@@ -345,7 +353,7 @@ function _proxy_json {
 			return 0
 		fi
 	else
-		#echo '# INFO: "'"${path_name}"'" config found.'
+		# less verbose; echo '# INFO: "'"${path_name}"'" config found.'
 		return 0
 	fi
 }
@@ -365,7 +373,7 @@ function _proxy_tmux {
 			return 0
 		fi
 	else
-		#echo '# INFO: "'"${path_name}"'" tmux session is running.'
+		# less verbose; echo '# INFO: "'"${path_name}"'" tmux session is running.'
 		return 0
 	fi
 }
@@ -419,6 +427,7 @@ function _service_enable {
 
 function _service {
 	if [[ ! -z "${service}" ]]; then
+		# removing service everytime in case there is an update
 		_service_disable
 		
 		if [ ! -f "${scriptpath}/${service}" ]; then
@@ -448,6 +457,7 @@ function _service {
 }
 
 function _ntp {
+	# dont run any bots on unsynced servers, also perfer UTC for binance
 	local timentp=$(timedatectl | grep -q 'NTP service: active')
 	local timeutc=$(timedatectl | grep -q 'Time zone: UTC (UTC, +0000)')
 	local timesyn=$(timedatectl | grep -q 'System clock synchronized: yes')
@@ -511,7 +521,7 @@ function _autostart {
 			string+='-\n'
 			printf -- "${string}"  
 
-			set -f; local arguments=("${bot}") #https://stackoverflow.com/a/15400047
+			set -f; local arguments=("${bot}") # its working, dont know why; https://stackoverflow.com/a/15400047
 			for argument in ${arguments[@]}; do
 
 				_config "${argument}"
@@ -581,12 +591,13 @@ function _autostart {
 function _kill {
 	tmux kill-session -t "${proxy}"
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
-		#https://unix.stackexchange.com/a/568928 
+		# trying to gracefully stop all bots; https://unix.stackexchange.com/a/568928 
 		tmux list-panes -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c &
 		((c++)) && ((c==100)) && break
 		sleep 0.1
 	done
 	if [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; then
+		# kill the rest
 		tmux kill-server 2>/dev/null
 	fi
 	_service_disable
@@ -602,7 +613,7 @@ function _stats {
 		| sed 's#real	##')
 	echo '# Ping avg. (Binance): '"${ping}"'ms | Vultr "Tokyo" Server avg.: 1.290ms'
 	echo '# Time to API (Binance): '"${time}"' | Vultr "Tokyo" Server avg.: 0m0.039s'
-	echo '# Free memory (Server): '"${mem_free}"'MB from '"${mem_total}"'MB | Vultr "Tokyo" Server avg.: 2 bots with 77MB free memory (1GB)'
+	echo '# Free memory (Server): '"${mem_free}"'MB  (max. '"${mem_total}"'MB) | Vultr "Tokyo" Server avg.: 2 bots with 100MB free memory (1GB)'
 	echo '# Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free: https://www.vultr.com/?ref=9122650-8H'
 	echo '-----'
 }
