@@ -160,12 +160,13 @@ function _git_download {
 		if [[ "$(find ${tmp} -maxdepth 1 -printf %y)" = "dd" ]]; then
 			# only one subdir; https://stackoverflow.com/a/32429482
 			tmp_sub=$(find ${tmp} -mindepth 1 -maxdepth 1 -type d)
-			cp -R "${tmp_sub}"/* "${path}"
+			cp -R "${tmp_sub}"/. "${path}"
 		else
-			cp -R "${tmp}"/* "${path}"
+			cp -R "${tmp}"/. "${path}"
 		fi
 
 		rm -rf "${tmp}" # keep tmp clean
+		rm -f "${git_latest_tmp}" # keep tmp clean
 
 		if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
 			echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
@@ -176,8 +177,8 @@ function _git_download {
 			exit 1
 		fi
 	else
-		echo '# FATAL: "'"${path_name}"'" version "'"${path_version}"'" file not found. Retry again!'
-		exit 1
+		echo '# ERROR: "'"${path_name}"'" version "'"${path_version}"'" file not found. Retry again!'
+		return 1
 	fi
 }
 
@@ -576,8 +577,12 @@ function _kill {
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
 		#https://unix.stackexchange.com/a/568928
 		tmux list-panes -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c &
+		((c++)) && ((c==100)) && break
 		sleep 0.1
 	done
+	if [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; then
+		tmux kill-server 2>/dev/null
+	fi
 	_service_disable
 	echo "# INFO: All bots stopped and restart service disabled."
 }
