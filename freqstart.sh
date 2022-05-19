@@ -149,11 +149,24 @@ function _git_latest {
 function _git_download {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
 	local file="${1}"
+	local tmp="/tmp/${path_name}_${path_version}_$(_hash)"
+
 	if [[ $(wget -S --spider "${file}" 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
-		mkdir -p "${path}"
+		mkdir -p "${tmp}"
 		wget -qO- "${file}" \
-			| tar xz -C "${path}" --strip-components=1
-			
+			| tar xz -C "${tmp}"
+		mkdir -p "${path}"
+				
+		if [[ "$(find ${tmp} -maxdepth 1 -printf %y)" = "dd" ]]; then
+			# only one subdir; https://stackoverflow.com/a/32429482
+			tmp_sub=$(find ${tmp} -mindepth 1 -maxdepth 1 -type d)
+			cp -R "${tmp_sub}"/* "${path}"
+		else
+			cp -R "${tmp}"/* "${path}"
+		fi
+
+		rm -rf "${tmp}" # keep tmp clean
+
 		if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
 			echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
 			return 0
@@ -163,8 +176,8 @@ function _git_download {
 			exit 1
 		fi
 	else
-		echo '# ERROR: "'"${path_name}"'" version "'"${path_version}"'" file not found.'
-		return 1
+		echo '# FATAL: "'"${path_name}"'" version "'"${path_version}"'" file not found. Retry again!'
+		exit 1
 	fi
 }
 
