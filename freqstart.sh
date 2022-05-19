@@ -6,18 +6,18 @@ clear
 # remember that it took a lot of time, testing and also money for infrastructure.
 # You can contribute by donating to the following wallets.
 # Thank you very much for that!
-
+#
 # BTC 1M6wztPA9caJbSrLxa6ET2bDJQdvigZ9hZ
 # ETH 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
 # BSC 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
 #
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly service='freqstart.service'
+readonly proxy='binance-proxy'
 
 readonly freqtrade_repo=('freqtrade' 'freqtrade/freqtrade')
 readonly nfi_repo=('NostalgiaForInfinity' 'iterativv/NostalgiaForInfinity')
 readonly proxy_repo=('binance-proxy' 'nightshift2k/binance-proxy')
-
 readonly git_repos=(
   freqtrade_repo[@]
   nfi_repo[@]
@@ -29,6 +29,10 @@ function _hash {
 		| tr -dc 'a-zA-Z0-9' \
 		| fold -w 32 \
 		| head -n 1)
+}
+
+function _date {
+	echo $(date +%y%m%d%H)
 }
 
 function _path {
@@ -72,7 +76,7 @@ function _git_repo {
 
 		if [[ "${path_name}" == "${git_name}" ]]; then
 			git_latest='https://api.github.com/repos/'"${git_value}"'/releases/latest'
-			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_hash)"'.json'
+			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_date)"'.json'
 			git_archive='https://github.com/'"${git_value}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
 			
 			return 0
@@ -98,7 +102,10 @@ function _git_latest {
 	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
 	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
 
-	curl -o "${git_latest_tmp}" -s -L "${git_latest}"
+	if [[ ! -f "${git_latest_tmp}" ]]; then
+		curl -o "${git_latest_tmp}" -s -L "${git_latest}"
+	fi
+	
 	if [[ -f "${git_latest_tmp}" ]]; then
 		git_latest_version=$(cat "${git_latest_tmp}" \
 			| grep -o '"tag_name": ".*"' \
@@ -166,7 +173,7 @@ function _git_download {
 		fi
 
 		rm -rf "${tmp}" # keep tmp clean
-		rm -f "${git_latest_tmp}" # keep tmp clean
+		# switched to 1h checks, rm -f "${git_latest_tmp}" # keep tmp clean
 
 		if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
 			echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
@@ -364,7 +371,7 @@ function _proxy_tmux {
 }
 
 function _proxy {
-	_path 'binance-proxy'
+	_path "${proxy}"
 	if [ "$?" -eq 0 ] ; then
 
 		if [[ ! -z "${git_latest_version}" ]] && [[ "${git_latest_version}" != "${path_latest_version}" ]]; then
@@ -540,13 +547,12 @@ function _autostart {
 						
 			tmux has-session -t "${botname}" 2>/dev/null
 			if [ "$?" -eq 0 ] ; then
-				echo '# ERROR: Sqlite "'"${botname}"'" already active. Rename database URL name!'
+				echo '# WARNING: Sqlite "'"${botname}"'" already active. Rename database URL name!'
 				local count=$((count+1))
 				local error=1
 			fi
 
 			if [[ "${error}" -eq 0 ]]; then
-
 				sudo /usr/bin/tmux new -s "${botname}" -d	
 				sudo /usr/bin/tmux send-keys -t "${botname}" "cd ${freqtrade}" Enter
 				sudo /usr/bin/tmux send-keys -t "${botname}" ". .env/bin/activate" Enter
@@ -573,7 +579,11 @@ function _autostart {
 }
 
 function _kill {
+<<<<<<< Updated upstream
 	tmux kill-session -t 'binance-proxy'
+=======
+	tmux kill-session -t "${proxy}"
+>>>>>>> Stashed changes
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
 		#https://unix.stackexchange.com/a/568928 
 		tmux list-panes -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c &
