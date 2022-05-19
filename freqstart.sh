@@ -590,7 +590,7 @@ function _kill {
 function _start {
 	_apt
 	_freqtrade
-	#_service
+	_service
 	_autostart
 }
 
