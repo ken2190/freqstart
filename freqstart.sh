@@ -40,8 +40,6 @@ function _path {
 	fi
 	path_name=$(basename "${path}" | sed 's#_.*##')
 	path_version=$(basename "${path}" | grep -o '_.*' | sed 's#_##')	
-	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
-	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
 
 	_git_repo
 	if [[ "$?" -eq 0 ]]; then
@@ -75,8 +73,6 @@ function _git_repo {
 		if [[ "${path_name}" == "${git_name}" ]]; then
 			git_latest='https://api.github.com/repos/'"${git_value}"'/releases/latest'
 			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_hash)"'.json'
-			git_latest_file=''
-			git_latest_version=''
 			git_archive='https://github.com/'"${git_value}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
 			
 			return 0
@@ -84,126 +80,90 @@ function _git_repo {
 	done
 }
 
-function _git_validate {
-	if [[ "${#}" -eq 0 ]]; then exit 1; fi
-	local file="${1}"
-	if [[ $(wget -S --spider "${file}" 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
+function _git_archive {
+	if [[ ! -d "${path}" ]]; then
+		_git_download "${git_archive}"
+	else
+		if [[ -z "$(ls -A ${path})" ]]; then
+			rm -rf "${path}"
+			_git_download "${git_archive}"
+		else
+			#echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
+			return 0
+		fi
+	fi
+}
+
+function _git_latest {
+	local path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
+	local path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
+
+	curl -o "${git_latest_tmp}" -s -L "${git_latest}"
+	if [[ -f "${git_latest_tmp}" ]]; then
+		local git_latest_version=$(cat "${git_latest_tmp}" \
+			| grep -o '"tag_name": ".*"' \
+			| sed 's/"tag_name": "//' \
+			| sed 's/"//')
+
+		if [[ "${path_latest_version}" == "${git_latest_version}" ]]; then
+			echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
+			
+			path_version="${path_latest_version}"
+			path="${path}"'_'"${path_version}"
+			
+			return 0
+		else
+			path_version="${git_latest_version}"
+			path="${path}"'_'"${path_version}"
+			
+			local browser_download_url=$(cat "${git_latest_tmp}" \
+				| grep -o -E '"browser_download_url": "(.*)Linux_x86_64.tar.gz"' \
+				| sed 's/"browser_download_url": "//' \
+				| sed 's/"//')
+			local tarball_url=$(cat "${git_latest_tmp}" \
+				| grep -o '"tarball_url": ".*"' \
+				| sed 's/"tarball_url": "//' \
+				| sed 's/"//')
+			
+			if [[ ! -z "${browser_download_url}" ]]; then
+				local git_latest_file="${browser_download_url}"
+			else
+				local git_latest_file="${tarball_url}"
+			fi
+				
+			_git_download "${git_latest_file}"
+		fi	
+	elif [[ ! -z "${path_latest_version}" ]]; then
+		echo '# WARNING: "'"${path_name}"'" latest git version not found. Trying local version "${path_latest_version}" instead.'
+
+		path_version="${path_latest_version}"
+		path="${path}"'_'"${path_version}"
+		
 		return 0
 	else
-		return 1
+		echo '# ERROR: "'"${path_name}"'" latest git not reachable. Check connection and retry again!'
+		exit 1
 	fi
 }
 
 function _git_download {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
-	
 	local file="${1}"
-
-	_git_validate "${file}"
-	if [[ "$?" -eq 0 ]]; then
+	if [[ $(wget -S --spider "${file}" 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
 		mkdir -p "${path}"
 		wget -qO- "${file}" \
 			| tar xz -C "${path}" --strip-components=1
 			
-			if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
-				echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
-				return 0
-			else
-				echo '# ERROR: "'"${path_name}"'" version "'"${path_version}"'" download failed. Restart script!'
-				rm -rf "${path}"
-				exit 1
-			fi
-	else
-		echo '# ERROR: "'"${path_name}"'" version "'"${path_version}"'" does not exist.'
-		return 1
-	fi
-}
-
-function _git_archive {
-	if [[ ! -d "${path}" ]]; then
-		_git_download "${git_archive}"
-	else
-		#echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
-		return 0
-	fi
-}
-
-function _git_latest_version {
-	git_latest_version=$(cat "${git_latest_tmp}" \
-		| grep -o '"tag_name": ".*"' \
-		| sed 's/"tag_name": "//' \
-		| sed 's/"//')
-	if [[ ! -z "${git_latest_version}" ]]; then
-		path="${path}"'_'"${git_latest_version}"
-		
-		if [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
+		if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
+			echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
 			return 0
 		else
-			return 1
+			echo '# FATAL: "'"${path_name}"'" version "'"${path_version}"'" download failed. Retry again!'
+			rm -rf "${path}"
+			exit 1
 		fi
 	else
-		return 1
-	fi
-}
-
-function _git_latest_tmp {
-	curl -o "${git_latest_tmp}" -s -L "${git_latest}"
-	if [[ -f "${git_latest_tmp}" ]]; then
-		return 0
-	else
-		return 1
-	fi
-}
-
-function _git_latest {
-	_git_latest_tmp
-	if [[ "$?" -eq 0 ]]; then
-		_git_latest_version
-		if [[ "$?" -eq 0 ]]; then
-			_git_latest_file
-			if [[ "$?" -eq 0 ]]; then
-				_git_download "${git_latest_file}"
-				if [[ "$?" -eq 0 ]]; then
-					echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" downloaded.'
-					return 0
-				else
-					echo '# ERROR: "'"${path_name}"'" latest version "'"${git_latest_version}"'" not downloaded.'
-					return 1
-				fi
-			else
-				echo '# ERROR: "'"${path_name}"'" latest version "'"${git_latest_version}"'" file not found.'
-				return 1
-			fi
-		else
-			#echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
-			return 0
-		fi
-	else
-		echo '# ERROR: "'"${path_name}"'" latest version "'"${git_latest_version}"'" not found.'
-		return 1
-	fi
-}
-
-function _git_latest_file {
-	local browser_download_url=$(cat "${git_latest_tmp}" \
-		| grep -o -E '"browser_download_url": "(.*)Linux_x86_64.tar.gz"' \
-		| sed 's/"browser_download_url": "//' \
-		| sed 's/"//')
-	local tarball_url=$(cat "${git_latest_tmp}" \
-		| grep -o '"tarball_url": ".*"' \
-		| sed 's/"tarball_url": "//' \
-		| sed 's/"//')
-	
-	if [[ ! -z "${browser_download_url}" ]]; then
-		git_latest_file="${browser_download_url}"
-	else
-		git_latest_file="${tarball_url}"
-	fi
-		
-	_git_validate "${git_latest_file}"
-	if [[ "$?" -eq 0 ]]; then
-		return 0
-	else
+		echo '# ERROR: "'"${path_name}"'" version "'"${path_version}"'" file not found.'
 		return 1
 	fi
 }
