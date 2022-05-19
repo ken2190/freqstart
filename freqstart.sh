@@ -552,7 +552,7 @@ function _autostart {
 				sudo /usr/bin/tmux new -s "${botname}" -d	
 				sudo /usr/bin/tmux send-keys -t "${botname}" "cd ${freqtrade}" Enter
 				sudo /usr/bin/tmux send-keys -t "${botname}" ". .env/bin/activate" Enter
-				#sudo /usr/bin/tmux send-keys -t "${botname}" "exec ${bot}" Enter
+				sudo /usr/bin/tmux send-keys -t "${botname}" "exec ${bot}" Enter
 				
 				sudo tmux has-session -t "${botname}" 2>/dev/null
 				if [ "$?" -eq 0 ] ; then
