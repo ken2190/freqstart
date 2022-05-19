@@ -6,18 +6,18 @@ clear
 # remember that it took a lot of time, testing and also money for infrastructure.
 # You can contribute by donating to the following wallets.
 # Thank you very much for that!
-
+#
 # BTC 1M6wztPA9caJbSrLxa6ET2bDJQdvigZ9hZ
 # ETH 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
 # BSC 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
 #
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly service='freqstart.service'
+readonly proxy='binance-proxy'
 
 readonly freqtrade_repo=('freqtrade' 'freqtrade/freqtrade')
 readonly nfi_repo=('NostalgiaForInfinity' 'iterativv/NostalgiaForInfinity')
 readonly proxy_repo=('binance-proxy' 'nightshift2k/binance-proxy')
-
 readonly git_repos=(
   freqtrade_repo[@]
   nfi_repo[@]
@@ -31,11 +31,16 @@ function _hash {
 		| head -n 1)
 }
 
+function _date {
+	echo $(date +%y%m%d%H)
+}
+
 function _path {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
 	
 	path="${1}"
 	if [[ -z $(echo "${path}" | grep -o '/') ]]; then
+		# because we are lazy; set the scriptpath
 		path="${scriptpath}"'/'"${path}"
 	fi
 	path_name=$(basename "${path}" | sed 's#_.*##')
@@ -43,6 +48,7 @@ function _path {
 
 	_git_repo
 	if [[ "$?" -eq 0 ]]; then
+		# if there is a version set, we try to get it from the git archive
 		if [[ ! -z "${path_version}" ]]; then
 			_git_archive
 			if [[ "$?" -eq 0 ]]; then
@@ -51,6 +57,7 @@ function _path {
 				return 1
 			fi
 		else
+		# if there is no version, we grep it from a cached json
 			_git_latest
 			if [[ "$?" -eq 0 ]]; then
 				return 0
@@ -59,12 +66,13 @@ function _path {
 			fi
 		fi
 	else
+		# maybe i add more strategies, should work with any, recommend some
 		echo '# ERROR: "'"${path_name}"'" git repo not found.'
 		return 1
 	fi
 }
 
-function _git_repo {
+function _git_repo {	
 	local count=${#git_repos[@]}
 	for ((i=0; i<$count; i++)); do
 		local git_name=${!git_repos[i]:0:1}
@@ -72,9 +80,10 @@ function _git_repo {
 
 		if [[ "${path_name}" == "${git_name}" ]]; then
 			git_latest='https://api.github.com/repos/'"${git_value}"'/releases/latest'
-			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_hash)"'.json'
+			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_date)"'.json'
 			git_archive='https://github.com/'"${git_value}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
 			
+			# we only return 0
 			return 0
 		fi
 	done
@@ -88,7 +97,7 @@ function _git_archive {
 			rm -rf "${path}"
 			_git_download "${git_archive}"
 		else
-			#echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
+			# less verbose; echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
 			return 0
 		fi
 	fi
@@ -98,13 +107,8 @@ function _git_latest {
 	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
 	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
 
-	curl -o "${git_latest_tmp}" -s -L "${git_latest}"
-	if [[ -f "${git_latest_tmp}" ]]; then
-		git_latest_version=$(cat "${git_latest_tmp}" \
-			| grep -o '"tag_name": ".*"' \
-			| sed 's/"tag_name": "//' \
-			| sed 's/"//')
-
+	_git_latest_version
+	if [[ "$?" -eq 0 ]]; then
 		if [[ "${path_latest_version}" == "${git_latest_version}" ]]; then
 			echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
 			
@@ -141,8 +145,24 @@ function _git_latest {
 		
 		return 0
 	else
-		echo '# ERROR: "'"${path_name}"'" latest git not reachable. Check connection and retry again!'
+		echo '# ERROR: "'"${path_name}"'" latest git not reachable. Retry again!'
 		exit 1
+	fi
+}
+
+function _git_latest_version {
+	if [[ ! -f "${git_latest_tmp}" ]]; then
+		curl -o "${git_latest_tmp}" -s -L "${git_latest}"
+	fi
+	
+	if [[ -f "${git_latest_tmp}" ]]; then
+		git_latest_version=$(cat "${git_latest_tmp}" \
+			| grep -o '"tag_name": ".*"' \
+			| sed 's/"tag_name": "//' \
+			| sed 's/"//')
+		return 0
+	else
+		return 1
 	fi
 }
 
@@ -158,15 +178,16 @@ function _git_download {
 		mkdir -p "${path}"
 				
 		if [[ "$(find ${tmp} -maxdepth 1 -printf %y)" = "dd" ]]; then
-			# only one subdir; https://stackoverflow.com/a/32429482
+			# only one subdir, i hate cp; https://stackoverflow.com/a/32429482
 			local tmp_sub=$(find ${tmp} -mindepth 1 -maxdepth 1 -type d)
 			cp -R "${tmp_sub}"/. "${path}"
 		else
 			cp -R "${tmp}"/. "${path}"
 		fi
-
-		rm -rf "${tmp}" # keep tmp clean
-		rm -f "${git_latest_tmp}" # keep tmp clean
+		
+		# keep tmp clean, save the environment
+		rm -rf "${tmp}"
+		# switched to 1h checks; rm -f "${git_latest_tmp}"
 
 		if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
 			echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
@@ -184,11 +205,16 @@ function _git_download {
 
 function _strategy {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
-
 	local strategy=$(echo "${1}" | grep -e '--strategy-path=.*' | sed 's#--strategy-path=##')
 	if [[ ! -z "${strategy}" ]]; then
 		_path "${strategy}"
 		if [[ "$?" -eq 0 ]]; then
+			_git_latest_version
+			if [[ "$?" -eq 0 ]]; then
+				if [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
+					echo '# INFO: Newer "'"${path_name}"'" version "'"${git_latest_version}"'" available.'
+				fi
+			fi
 			return 0
 		else
 			return 1
@@ -208,6 +234,7 @@ function _apt {
 		string+='Installed unattended-upgrades. Remove file to update server again.'
 		printf "${string}" > "${scriptpath}/update.txt";
 		
+		# update your environment
 		sudo apt update && \
 		sudo apt -o Dpkg::Options::="--force-confdef" dist-upgrade -y && \
 		sudo apt install -y unattended-upgrades && \
@@ -216,14 +243,6 @@ function _apt {
 		then read -p "A reboot is required to finish installing updates. Press [ENTER] to reboot now, or [CTRL+C] to cancel and reboot later." && \
 		sudo reboot; \
 		else echo "A reboot is not required. Exiting..."; fi
-	fi
-}
-
-function _freqtrade_installed {
-	if [[ ! -z $(cd "${path}"; source .env/bin/activate 2>/dev/null; freqtrade --version 2>/dev/null | sed 's/freqtrade //') ]]; then
-		return 0
-	else
-		return 1
 	fi
 }
 
@@ -259,9 +278,18 @@ function _freqtrade {
 				return 0
 			fi
 		else
-			#echo '# INFO: "'"${path_name}"'" is already installed.'
+			# less verbose; echo '# INFO: "'"${path_name}"'" is already installed.'
 			return 0
 		fi
+	else
+		return 1
+	fi
+}
+
+function _freqtrade_installed {
+	# -x command doesnt work, this does
+	if [[ ! -z $(cd "${path}"; source .env/bin/activate 2>/dev/null; freqtrade --version 2>/dev/null | sed 's/freqtrade //') ]]; then
+		return 0
 	else
 		return 1
 	fi
@@ -338,7 +366,7 @@ function _proxy_json {
 			return 0
 		fi
 	else
-		#echo '# INFO: "'"${path_name}"'" config found.'
+		# less verbose; echo '# INFO: "'"${path_name}"'" config found.'
 		return 0
 	fi
 }
@@ -358,13 +386,13 @@ function _proxy_tmux {
 			return 0
 		fi
 	else
-		#echo '# INFO: "'"${path_name}"'" tmux session is running.'
+		# less verbose; echo '# INFO: "'"${path_name}"'" tmux session is running.'
 		return 0
 	fi
 }
 
 function _proxy {
-	_path 'binance-proxy'
+	_path "${proxy}"
 	if [ "$?" -eq 0 ] ; then
 
 		if [[ ! -z "${git_latest_version}" ]] && [[ "${git_latest_version}" != "${path_latest_version}" ]]; then
@@ -412,6 +440,7 @@ function _service_enable {
 
 function _service {
 	if [[ ! -z "${service}" ]]; then
+		# removing service everytime in case there is an update
 		_service_disable
 		
 		if [ ! -f "${scriptpath}/${service}" ]; then
@@ -441,6 +470,7 @@ function _service {
 }
 
 function _ntp {
+	# dont run any bots on unsynced servers, also perfer UTC for binance
 	local timentp=$(timedatectl | grep -q 'NTP service: active')
 	local timeutc=$(timedatectl | grep -q 'Time zone: UTC (UTC, +0000)')
 	local timesyn=$(timedatectl | grep -q 'System clock synchronized: yes')
@@ -495,7 +525,7 @@ function _autostart {
 		local error=0
 	
 		if [[ ! -z $(echo "${bot}" | grep -o -E '^freqtrade') ]]; then
-			local botname=$(echo "${bot}" | grep -o -E 'sqlite(.*)sqlite' | sed 's#.sqlite##' | sed 's#sqlite:///##')
+			local bot_name=$(echo "${bot}" | grep -o -E 'sqlite(.*)sqlite' | sed 's#.sqlite##' | sed 's#sqlite:///##')
 			
 			string=''
 			string+='# FREQTRADE:\n'
@@ -504,7 +534,7 @@ function _autostart {
 			string+='-\n'
 			printf -- "${string}"  
 
-			set -f; local arguments=("${bot}") #https://stackoverflow.com/a/15400047
+			set -f; local arguments=("${bot}") # its working, dont know why; https://stackoverflow.com/a/15400047
 			for argument in ${arguments[@]}; do
 
 				_config "${argument}"
@@ -518,12 +548,12 @@ function _autostart {
 				fi
 			done
 			
-			if [[ -z "${botname}" ]]; then
+			if [[ -z "${bot_name}" ]]; then
 				echo '# ERROR: Override trades database URL.'
 				local error=1
 			fi
 			
-			if [[ "${botname}" =~ ['!@#$%^&*()_+.'] ]]; then
+			if [[ "${bot_name}" =~ ['!@#$%^&*()_+.'] ]]; then
 				echo '# ERROR: Do not use special characters in database URL name.'
 				local error=1
 			fi
@@ -538,24 +568,23 @@ function _autostart {
 				local error=1
 			fi
 						
-			tmux has-session -t "${botname}" 2>/dev/null
+			_tmux_session "${bot_name}"
 			if [ "$?" -eq 0 ] ; then
-				echo '# ERROR: Sqlite "'"${botname}"'" already active. Rename database URL name!'
+				echo '# WARNING: Sqlite "'"${bot_name}"'" already active. Rename database URL name!'
 				local count=$((count+1))
 				local error=1
 			fi
 
 			if [[ "${error}" -eq 0 ]]; then
-
-				sudo /usr/bin/tmux new -s "${botname}" -d	
-				sudo /usr/bin/tmux send-keys -t "${botname}" "cd ${freqtrade}" Enter
-				sudo /usr/bin/tmux send-keys -t "${botname}" ". .env/bin/activate" Enter
-				sudo /usr/bin/tmux send-keys -t "${botname}" "exec ${bot}" Enter
+				sudo /usr/bin/tmux new -s "${bot_name}" -d	
+				sudo /usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" Enter
+				sudo /usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" Enter
+				sudo /usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" Enter
 				
-				_tmux_session "${botname}"
+				_tmux_session "${bot_name}"
 				if [ "$?" -eq 0 ] ; then
 					local count=$((count+1))
-					echo '# INFO: Freqtrade "'"${botname}"'" started.'
+					echo '# INFO: Freqtrade "'"${bot_name}"'" started.'
 				fi
 			fi
 			
@@ -573,14 +602,15 @@ function _autostart {
 }
 
 function _kill {
-	tmux kill-session -t 'binance-proxy'
+	tmux kill-session -t "${proxy}"
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
-		#https://unix.stackexchange.com/a/568928 
+		# trying to gracefully stop all bots; https://unix.stackexchange.com/a/568928 
 		tmux list-panes -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c &
 		((c++)) && ((c==100)) && break
 		sleep 0.1
 	done
 	if [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; then
+		# kill the rest
 		tmux kill-server 2>/dev/null
 	fi
 	_service_disable
@@ -596,7 +626,7 @@ function _stats {
 		| sed 's#real	##')
 	echo '# Ping avg. (Binance): '"${ping}"'ms | Vultr "Tokyo" Server avg.: 1.290ms'
 	echo '# Time to API (Binance): '"${time}"' | Vultr "Tokyo" Server avg.: 0m0.039s'
-	echo '# Free memory (Server): '"${mem_free}"'MB from '"${mem_total}"'MB | Vultr "Tokyo" Server avg.: 2 bots with 77MB free memory (1GB)'
+	echo '# Free memory (Server): '"${mem_free}"'MB  (max. '"${mem_total}"'MB) | Vultr "Tokyo" Server avg.: 2 bots with 100MB free memory (1GB)'
 	echo '# Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free: https://www.vultr.com/?ref=9122650-8H'
 	echo '-----'
 }
