@@ -72,7 +72,7 @@ function _path {
 	fi
 }
 
-function _git_repo {
+function _git_repo {	
 	local count=${#git_repos[@]}
 	for ((i=0; i<$count; i++)); do
 		local git_name=${!git_repos[i]:0:1}
@@ -83,7 +83,7 @@ function _git_repo {
 			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_date)"'.json'
 			git_archive='https://github.com/'"${git_value}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
 			
-			# we only return 0; took me 3h why only the first got served
+			# we only return 0
 			return 0
 		fi
 	done
@@ -107,16 +107,8 @@ function _git_latest {
 	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
 	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
 
-	if [[ ! -f "${git_latest_tmp}" ]]; then
-		curl -o "${git_latest_tmp}" -s -L "${git_latest}"
-	fi
-	
-	if [[ -f "${git_latest_tmp}" ]]; then
-		git_latest_version=$(cat "${git_latest_tmp}" \
-			| grep -o '"tag_name": ".*"' \
-			| sed 's/"tag_name": "//' \
-			| sed 's/"//')
-
+	_git_latest_version
+	if [[ "$?" -eq 0 ]]; then
 		if [[ "${path_latest_version}" == "${git_latest_version}" ]]; then
 			echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
 			
@@ -153,8 +145,24 @@ function _git_latest {
 		
 		return 0
 	else
-		echo '# ERROR: "'"${path_name}"'" latest git not reachable. Check connection and retry again!'
+		echo '# ERROR: "'"${path_name}"'" latest git not reachable. Retry again!'
 		exit 1
+	fi
+}
+
+function _git_latest_version {
+	if [[ ! -f "${git_latest_tmp}" ]]; then
+		curl -o "${git_latest_tmp}" -s -L "${git_latest}"
+	fi
+	
+	if [[ -f "${git_latest_tmp}" ]]; then
+		git_latest_version=$(cat "${git_latest_tmp}" \
+			| grep -o '"tag_name": ".*"' \
+			| sed 's/"tag_name": "//' \
+			| sed 's/"//')
+		return 0
+	else
+		return 1
 	fi
 }
 
@@ -197,11 +205,16 @@ function _git_download {
 
 function _strategy {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
-
 	local strategy=$(echo "${1}" | grep -e '--strategy-path=.*' | sed 's#--strategy-path=##')
 	if [[ ! -z "${strategy}" ]]; then
 		_path "${strategy}"
 		if [[ "$?" -eq 0 ]]; then
+			_git_latest_version
+			if [[ "$?" -eq 0 ]]; then
+				if [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
+					echo '# INFO: Newer "'"${path_name}"'" version "'"${git_latest_version}"'" available.'
+				fi
+			fi
 			return 0
 		else
 			return 1
@@ -512,7 +525,7 @@ function _autostart {
 		local error=0
 	
 		if [[ ! -z $(echo "${bot}" | grep -o -E '^freqtrade') ]]; then
-			local botname=$(echo "${bot}" | grep -o -E 'sqlite(.*)sqlite' | sed 's#.sqlite##' | sed 's#sqlite:///##')
+			local bot_name=$(echo "${bot}" | grep -o -E 'sqlite(.*)sqlite' | sed 's#.sqlite##' | sed 's#sqlite:///##')
 			
 			string=''
 			string+='# FREQTRADE:\n'
@@ -535,12 +548,12 @@ function _autostart {
 				fi
 			done
 			
-			if [[ -z "${botname}" ]]; then
+			if [[ -z "${bot_name}" ]]; then
 				echo '# ERROR: Override trades database URL.'
 				local error=1
 			fi
 			
-			if [[ "${botname}" =~ ['!@#$%^&*()_+.'] ]]; then
+			if [[ "${bot_name}" =~ ['!@#$%^&*()_+.'] ]]; then
 				echo '# ERROR: Do not use special characters in database URL name.'
 				local error=1
 			fi
@@ -555,23 +568,23 @@ function _autostart {
 				local error=1
 			fi
 						
-			tmux has-session -t "${botname}" 2>/dev/null
+			_tmux_session "${bot_name}"
 			if [ "$?" -eq 0 ] ; then
-				echo '# WARNING: Sqlite "'"${botname}"'" already active. Rename database URL name!'
+				echo '# WARNING: Sqlite "'"${bot_name}"'" already active. Rename database URL name!'
 				local count=$((count+1))
 				local error=1
 			fi
 
 			if [[ "${error}" -eq 0 ]]; then
-				sudo /usr/bin/tmux new -s "${botname}" -d	
-				sudo /usr/bin/tmux send-keys -t "${botname}" "cd ${freqtrade}" Enter
-				sudo /usr/bin/tmux send-keys -t "${botname}" ". .env/bin/activate" Enter
-				sudo /usr/bin/tmux send-keys -t "${botname}" "exec ${bot}" Enter
+				sudo /usr/bin/tmux new -s "${bot_name}" -d	
+				sudo /usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" Enter
+				sudo /usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" Enter
+				sudo /usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" Enter
 				
-				_tmux_session "${botname}"
+				_tmux_session "${bot_name}"
 				if [ "$?" -eq 0 ] ; then
 					local count=$((count+1))
-					echo '# INFO: Freqtrade "'"${botname}"'" started.'
+					echo '# INFO: Freqtrade "'"${bot_name}"'" started.'
 				fi
 			fi
 			
