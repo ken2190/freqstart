@@ -95,12 +95,12 @@ function _git_archive {
 }
 
 function _git_latest {
-	local path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
-	local path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
+	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
+	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
 
 	curl -o "${git_latest_tmp}" -s -L "${git_latest}"
 	if [[ -f "${git_latest_tmp}" ]]; then
-		local git_latest_version=$(cat "${git_latest_tmp}" \
+		git_latest_version=$(cat "${git_latest_tmp}" \
 			| grep -o '"tag_name": ".*"' \
 			| sed 's/"tag_name": "//' \
 			| sed 's/"//')
@@ -159,7 +159,7 @@ function _git_download {
 				
 		if [[ "$(find ${tmp} -maxdepth 1 -printf %y)" = "dd" ]]; then
 			# only one subdir; https://stackoverflow.com/a/32429482
-			tmp_sub=$(find ${tmp} -mindepth 1 -maxdepth 1 -type d)
+			local tmp_sub=$(find ${tmp} -mindepth 1 -maxdepth 1 -type d)
 			cp -R "${tmp_sub}"/. "${path}"
 		else
 			cp -R "${tmp}"/. "${path}"
@@ -297,7 +297,6 @@ function _tmux {
 
 function _tmux_session {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
-	_tmux
 
 	tmux has-session -t "${1}" 2>/dev/null
 	if [[ "$?" -eq 0 ]]; then
@@ -347,8 +346,9 @@ function _proxy_json {
 function _proxy_tmux {
 	_tmux_session "${path_name}"
 	if [[ "$?" -eq 1 ]]; then
-		sudo /usr/bin/tmux new -s "${path_name}" -d
-		sudo /usr/bin/tmux send-keys -t "${path_name}" "exec ${path}/${path_name} -v" Enter
+		/usr/bin/tmux new -s "${path_name}" -d
+		/usr/bin/tmux send-keys -t "${path_name}" "${path}/${path_name} -v" Enter
+		
 		_tmux_session "${path_name}"
 		if [[ "$?" -eq 1 ]]; then
 			echo '# ERROR: Can not start "'"${path_name}"'" tmux session.'
@@ -366,6 +366,7 @@ function _proxy_tmux {
 function _proxy {
 	_path 'binance-proxy'
 	if [ "$?" -eq 0 ] ; then
+
 		if [[ ! -z "${git_latest_version}" ]] && [[ "${git_latest_version}" != "${path_latest_version}" ]]; then
 			echo '# INFO: New "'"${path_name}"'" "'"${path_version}"'" has been downloaded.'
 			
@@ -458,7 +459,6 @@ function _ntp {
 }
 
 function _autostart {
-	_ntp
 	_proxy
 	
 	local autostart="${scriptpath}/autostart.txt"
@@ -489,8 +489,6 @@ function _autostart {
 	string+='# Type "'"${scriptname}"' -k" to disable all bots and service.\n'
 	string+='-----\n'
 	printf -- "${string}"
-	
-	_stats
 	
 	local count=0
 	for bot in "${bots[@]}"; do		
@@ -554,7 +552,7 @@ function _autostart {
 				sudo /usr/bin/tmux send-keys -t "${botname}" ". .env/bin/activate" Enter
 				sudo /usr/bin/tmux send-keys -t "${botname}" "exec ${bot}" Enter
 				
-				sudo tmux has-session -t "${botname}" 2>/dev/null
+				_tmux_session "${botname}"
 				if [ "$?" -eq 0 ] ; then
 					local count=$((count+1))
 					echo '# INFO: Freqtrade "'"${botname}"'" started.'
@@ -571,11 +569,13 @@ function _autostart {
 		echo '# INFO: There are "'"${count}"'" active freqtrade bots.'
 	fi
 	echo '-----'
+	_stats
 }
 
 function _kill {
+	tmux kill-session -t 'binance-proxy'
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
-		#https://unix.stackexchange.com/a/568928
+		#https://unix.stackexchange.com/a/568928 
 		tmux list-panes -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c &
 		((c++)) && ((c==100)) && break
 		sleep 0.1
@@ -585,13 +585,6 @@ function _kill {
 	fi
 	_service_disable
 	echo "# INFO: All bots stopped and restart service disabled."
-}
-
-function _start {
-	_apt
-	_freqtrade
-	_service
-	_autostart
 }
 
 function _stats {
@@ -606,6 +599,15 @@ function _stats {
 	echo '# Free memory (Server): '"${mem_free}"'MB from '"${mem_total}"'MB | Vultr "Tokyo" Server avg.: 2 bots with 77MB free memory (1GB)'
 	echo '# Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free: https://www.vultr.com/?ref=9122650-8H'
 	echo '-----'
+}
+
+function _start {
+	_apt
+	_tmux
+	_ntp
+	_freqtrade
+	_service
+	_autostart
 }
 
 if [[ ! -z "$*" ]]; then

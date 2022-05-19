@@ -33,6 +33,7 @@ If you are not familiar with freqtrade, please read the complete documentation f
 This project is beeing developed and testet on Vultr "Tokyo" Server with Debian.
 
 Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:
+
 [https://www.vultr.com/?ref=9122650-8H](https://www.vultr.com/?ref=9122650-8H)
 
 ### Installation
