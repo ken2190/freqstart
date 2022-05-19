@@ -13,8 +13,16 @@ clear
 #
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly service='freqstart.service'
-readonly freqtrade_repo="freqtrade/freqtrade"
-readonly nfi_repo="iterativv/NostalgiaForInfinity"
+
+readonly freqtrade_repo=('freqtrade' 'freqtrade/freqtrade')
+readonly nfi_repo=('NostalgiaForInfinity' 'iterativv/NostalgiaForInfinity')
+readonly proxy_repo=('binance-proxy' 'nightshift2k/binance-proxy')
+
+readonly git_repos=(
+  freqtrade_repo[@]
+  nfi_repo[@]
+  proxy_repo[@]
+)
 
 function _hash {
 	echo $(cat /dev/urandom \
@@ -27,18 +35,16 @@ function _path {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
 	
 	path="${1}"
+	if [[ -z $(echo "${path}" | grep -o '/') ]]; then
+		path="${scriptpath}"'/'"${path}"
+	fi
 	path_name=$(basename "${path}" | sed 's#_.*##')
 	path_version=$(basename "${path}" | grep -o '_.*' | sed 's#_##')	
 	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
 	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
-	git_repo=$(_git_repo)
-	git_latest='https://api.github.com/repos/'"${git_repo}"'/releases/latest'
-	git_latest_tmp='/tmp/'"${path_name}"'_'"$(_hash)"'.json'
-	git_latest_file=''
-	git_latest_version=''
-	git_archive='https://github.com/'"${git_repo}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
 
-	if [[ ! -z "${git_repo}" ]]; then
+	_git_repo
+	if [[ "$?" -eq 0 ]]; then
 		if [[ ! -z "${path_version}" ]]; then
 			_git_archive
 			if [[ "$?" -eq 0 ]]; then
@@ -61,13 +67,24 @@ function _path {
 }
 
 function _git_repo {
-	if [[ "${path_name}" == 'NostalgiaForInfinity' ]]; then
-		echo "${nfi_repo}"
-	elif [[ "${path_name}" == 'freqtrade' ]]; then
-		echo "${freqtrade_repo}"
-	else
-		echo ''
-	fi
+	local count=${#git_repos[@]}
+	for ((i=0; i<"${count}"; i++)); do
+		local git_name=${!git_repos[i]:0:1}
+		local git_value=${!git_repos[i]:1:1}
+
+		if [[ "${path_name}" == "${git_name}" ]]; then
+			git_repo="${git_value}"
+			git_latest='https://api.github.com/repos/'"${git_repo}"'/releases/latest'
+			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_hash)"'.json'
+			git_latest_file=''
+			git_latest_version=''
+			git_archive='https://github.com/'"${git_repo}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
+			
+			return 0
+		else
+			return 1
+		fi
+	done
 }
 
 function _git_validate {
@@ -87,13 +104,6 @@ function _git_download {
 
 	_git_validate "${file}"
 	if [[ "$?" -eq 0 ]]; then
-		echo "file ------ ${file}"
-		if [[ ! -z "${git_latest_version}" ]]; then
-			path_version="${git_latest_version}"
-		fi
-		
-		path="${scriptpath}"'/'"${path_name}"'_'"${path_version}"
-
 		mkdir -p "${path}"
 		wget -qO- "${file}" \
 			| tar xz -C "${path}" --strip-components=1
@@ -131,9 +141,13 @@ function _git_latest_version {
 		| grep -o '"tag_name": ".*"' \
 		| sed 's/"tag_name": "//' \
 		| sed 's/"//')
-		
-	if [[ ! -z "${git_latest_version}" ]] && [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
-		return 0
+	if [[ ! -z "${git_latest_version}" ]]; then
+		path="${path}"'_'"${git_latest_version}"
+		if [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
+			return 0
+		else
+			return 1
+		fi
 	else
 		return 1
 	fi
@@ -201,11 +215,6 @@ function _git_latest_file {
 	fi
 }
 
-
-
-
-
-
 function _strategy {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
 	
@@ -244,22 +253,8 @@ function _apt {
 	fi
 }
 
-function _tmux {
-	if [[ ! -x "$(command -v tmux)" ]]; then
-		sudo apt-get update -y >/dev/null
-		sudo apt-get install -y tmux >/dev/null
-		
-		if [[ ! -x "$(command -v tmux)" ]]; then
-			echo "# ERROR: TMUX not installed."
-			exit 1
-		fi
-	fi
-}
-
 function _freqtrade_installed {
-	if [[ ! -x $(cd "${path}"; \
-		source .env/bin/activate 2>/dev/null; \
-		command -v freqtrade) ]]; then
+	if [[ ! -z $(cd "${path}"; source .env/bin/activate 2>/dev/null; freqtrade --version 2>/dev/null | sed 's/freqtrade //') ]]; then
 		return 0
 	else
 		return 1
@@ -269,7 +264,6 @@ function _freqtrade_installed {
 function _freqtrade {
 	_path 'freqtrade'
 	if [[ "$?" -eq 0 ]]; then
-		
 		_freqtrade_installed
 		if [[ "$?" -eq 1 ]]; then
 
@@ -299,10 +293,11 @@ function _freqtrade {
 				return 0
 			fi
 		else
+			echo '# INFO: "'"${path_name}"'" already installed.'
 			return 0
 		fi
 	else
-		exit 1
+		return 1
 	fi
 }
 
@@ -376,17 +371,7 @@ function _nfi {
 	fi
 }
 
-function _proxy {
-	local proxy_name="binance-proxy"
-	local proxy_path=$(ls -d "${scriptpath}"/"${proxy_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
-	local proxy_new_path=''
-	local proxy_version=$(basename "${proxy_path}" | sed 's#.*_##')
-	local git_latest="https://api.github.com/repos/nightshift2k/binance-proxy/releases/latest"
-	local git_version=$(curl -s "${git_latest}" | grep -o '"tag_name": ".*"' \
-		| sed 's/"tag_name": "//' \
-		| sed 's/"//')
-	local git_url=''
-
+function _proxy_json {
 	if [[ ! -f "${scriptpath}/proxy.json" ]]; then
 		string=$(cat <<-END
 			{
@@ -411,55 +396,82 @@ function _proxy {
 		printf "${string}" > "${scriptpath}/proxy.json";
 		
 		if [[ ! -f "${scriptpath}/proxy.json" ]]; then
-			echo '# WARNING: Proxy config does not exist.'
-		fi
-	fi
-
-	if [[ ! -z "${git_version}" ]]; then
-		if [[ "${git_version}" != "${proxy_version}" ]]; then
-			local proxy_new_path="${scriptpath}/${proxy_name}_${git_version}"
-			if [[ ! -d "${proxy_new_path}" ]]; then
-				local git_url=$(curl -s "${git_latest}" \
-					| grep -o -E '"browser_download_url": "(.*)Linux_x86_64.tar.gz"' \
-					| sed 's/"browser_download_url": "//' \
-					| sed 's/"//')
-				if _git_validate "${git_url}"; then
-					mkdir -p "${proxy_new_path}"
-					wget -qO- "${git_url}" \
-						| tar xz -C "${proxy_new_path}"
-					if [[ -f "${proxy_new_path}/${proxy_name}" ]]; then
-						echo '# INFO: New proxy "'"${git_version}"'" has been downloaded.'
-
-						sudo chmod +x "${proxy_new_path}/${proxy_name}"
-						local proxy_path="${proxy_new_path}"
-						
-						tmux has-session -t "${proxy_name}" 2>/dev/null
-						if [ "$?" -eq 0 ] ; then
-							tmux kill-session -t "${proxy_name}"
-							echo '# WARNING: Restarting "'"${proxy_name}"'" tmux session. Review all running bots!'
-						fi
-					fi
-				else
-					echo '# ERROR: Can not download latest "'"${proxy_name}"'" file.'
-				fi
-			fi		
+			echo '# ERROR: Can not create "${path_name}" config.'
+			return 1
+		else
+			echo '# INFO: "${path_name}" config created.'
+			return 0
 		fi
 	else
-		echo '# ERROR: Can not get latest "'"${proxy_name}"'" version.'
+		return 0
 	fi
-	
-	if [[ -f "${proxy_path}/${proxy_name}" ]]; then
-		tmux has-session -t "${proxy_name}" 2>/dev/null
-		if [ ! "$?" -eq 0 ] ; then
-			sudo /usr/bin/tmux new -s "${proxy_name}" -d
-			sudo /usr/bin/tmux send-keys -t "${proxy_name}" "exec ${proxy_path}/${proxy_name} -v" Enter
-			
-			tmux has-session -t "${proxy_name}" 2>/dev/null
-			if [ ! "$?" -eq 0 ] ; then
-				echo '# ERROR: Can not start "'"${proxy_name}"'" tmux session.'
-			fi
+}
+
+function _tmux {
+	if [[ ! -x "$(command -v tmux)" ]]; then
+		sudo apt-get update -y >/dev/null
+		sudo apt-get install -y tmux >/dev/null
+		
+		if [[ ! -x "$(command -v tmux)" ]]; then
+			echo "# ERROR: TMUX not installed."
+			exit 1
 		fi
 	fi
+}
+
+function _tmux_session {
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+	_tmux
+
+	tmux has-session -t "${1}" 2>/dev/null
+	if [[ "$?" -eq 0 ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+function _proxy_tmux {
+	_tmux_session "${path_name}"
+	if [[ "$?" -eq 1 ]]; then
+		sudo /usr/bin/tmux new -s "${path_name}" -d
+		sudo /usr/bin/tmux send-keys -t "${path_name}" "exec ${path}/${path_name} -v" Enter
+		_tmux_session "${path_name}"
+		if [[ "$?" -eq 1 ]]; then
+			echo '# ERROR: Can not start "'"${path_name}"'" tmux session.'
+			return 1
+		else
+			echo '# INFO: New "'"${path_name}"'" tmux session startet.'
+			return 0
+		fi
+	else
+		echo '# INFO: "'"${path_name}"'" tmux session is running.'
+		return 0
+	fi
+}
+
+function _proxy {
+	_path='binance-proxy'
+	_proxy_json
+		echo "path_name ... ${path_name}"
+
+	echo "path_latest_version ... ${path_latest_version}"
+	echo "git_latest_version ... ${git_latest_version}"
+	
+	if [[ ! -z "${git_latest_version}" ]] && [[ "${git_latest_version}" != "${path_latest_version}" ]]; then
+		echo '# INFO: New "'"${path_name}"'" "'"${path_version}"'" has been downloaded.'
+		
+		if [[ ! -x "${path}"'/'"${path_name}" ]]; then
+			sudo chmod +x "${path}"'/'"${path_name}"
+		fi
+		
+		_tmux_session "${path_name}"
+		if [ "$?" -eq 0 ] ; then
+			echo '# WARNING: Restarting "'"${path_name}"'" tmux session. Review all running bots!'
+			tmux kill-session -t "${path_name}"
+		fi
+	fi
+	_proxy_tmux	
 }
 
 function _service_disable {
@@ -536,7 +548,6 @@ function _ntp {
 }
 
 function _autostart {
-	_tmux
 	_ntp
 	_proxy
 	
@@ -666,7 +677,7 @@ function _start {
 	_apt
 	_freqtrade
 	#_service
-	#_autostart
+	_autostart
 }
 
 function _stats {
