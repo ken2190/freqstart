@@ -44,7 +44,7 @@ function _path {
 	
 	path="${1}"
 	if [[ -z $(echo "${path}" | grep -o '/') ]]; then
-		# because we are lazy; set the scriptpath
+		# because we are lazy, set the scriptpath if no directory is found
 		path="${scriptpath}"'/'"${path}"
 	fi
 	path_name=$(basename "${path}" | sed 's#_.*##')
@@ -108,7 +108,11 @@ function _git_archive {
 }
 
 function _git_latest {
-	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
+	path_latest=$(ls -d "${path}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
+	path_previous=''
+	if [[ ! -z "${path_latest}" ]]; then
+		path_previous=$(ls -d "${path}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -2 | tail -1)
+	fi	
 	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
 
 	_git_latest_version
@@ -284,23 +288,11 @@ function _freqtrade {
 function _freqtrade_setup {
 	_kill
 	
-	sudo chmod +x "${path}/setup.sh"
-	
-	echo '# Installing "'"${path_name}"'" may take some time, please be patient...'
-	cd "${path}"
-	yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
-		
-	echo '# Installing "pandas-ta" may take some time, please be patient...'
-	cd "${path}"
-	_env_deactivate
-	python3 -m venv .env >/dev/null 2>&1
-	source .env/bin/activate
-	python3 -m pip install --upgrade pip >/dev/null 2>&1
-	python3 -m pip install -e . >/dev/null 2>&1
-	pip install pandas-ta >/dev/null 2>&1
-	_env_deactivate
-	
 	# get that precious sqlite databases into the newest install
+	if [[ ! -z "${path_previous}" ]]; then
+		path_latest="${path_previous}"
+	fi
+	
 	if [[ ! -z $(find "${path_latest}" -type f | grep 'sqlite$') ]]; then
 		echo '# Copy sqlite databases from "'"${path_latest}"'" to "'"${path}"'" now:'
 
@@ -323,6 +315,22 @@ function _freqtrade_setup {
 	else
 		echo '# No sqlite databases in "'"${path_latest}"'" found.'
 	fi
+	
+	sudo chmod +x "${path}/setup.sh"
+	
+	echo '# Installing "'"${path_name}"'" may take some time, please be patient...'
+	cd "${path}"
+	yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
+		
+	echo '# Installing "pandas-ta" may take some time, please be patient...'
+	cd "${path}"
+	_env_deactivate
+	python3 -m venv .env >/dev/null 2>&1
+	source .env/bin/activate
+	python3 -m pip install --upgrade pip >/dev/null 2>&1
+	python3 -m pip install -e . >/dev/null 2>&1
+	pip install pandas-ta >/dev/null 2>&1
+	_env_deactivate
 			
 	_freqtrade_installed
 	if [[ "$?" -eq 1 ]]; then				
@@ -330,7 +338,8 @@ function _freqtrade_setup {
 		echo '# ERROR: "'"${path_name}"'" not installed. Retry again!'
 		exit 1
 	else
-		echo '# "'"${path_name}"'" install successfully finished.'		
+		echo '# "'"${path_name}"'" version "'"${path_version}"'" successfully installed.'
+		echo '-'		
 		return 0
 	fi
 }
