@@ -265,17 +265,17 @@ function _freqtrade {
 					read -p '# Stop all bots and install newer "'"${path_name}"'" version "'"${git_latest_version}"'" and copy sqlite databases? (y/n) ' _yn
 					case ${_yn} in 
 						[yY])
-							_freqtrade_setup
+							_freqtrade_update
 							break;;
 						[nN])
-							return 1;;
+							break;;
 						*)
 							_invalid
 							;;
 					esac
 				done
-			
 			fi
+			_freqtrade_setup
 		else
 			# less verbose; echo '# "'"${path_name}"'" is already installed.'
 			return 0
@@ -285,12 +285,12 @@ function _freqtrade {
 	fi
 }
 
-function _freqtrade_setup {
+function _freqtrade_update {
 	_kill
 	
 	# get that precious sqlite databases into the newest install
 	if [[ ! -z "${path_previous}" ]]; then
-		path_latest="${path_previous}"
+		local path_latest="${path_previous}"
 	fi
 	
 	if [[ ! -z $(find "${path_latest}" -type f | grep 'sqlite$') ]]; then
@@ -312,10 +312,14 @@ function _freqtrade_setup {
 				exit 1
 			fi
 		done
+		return 0
 	else
 		echo '# No sqlite databases in "'"${path_latest}"'" found.'
+		return 0
 	fi
-	
+}
+
+function _freqtrade_setup {
 	sudo chmod +x "${path}/setup.sh"
 	
 	echo '# Installing "'"${path_name}"'" may take some time, please be patient...'
@@ -342,6 +346,7 @@ function _freqtrade_setup {
 		echo '-'		
 		return 0
 	fi
+
 }
 
 function _freqtrade_installed {
@@ -569,16 +574,15 @@ function _autostart {
 
 	string=''
 	string+='-----\n'
-	string+='# Starting FREQTRADE bots...\n'
+	string+='# Starting Freqtrade Trading Bots...\n'
 	string+='-----\n'
 	string+='# Type "tmux a" to attach to latest TMUX session.\n'
 	string+='# Use "ctrl+b s" to switch between TMUX sessions.\n'
 	string+='# Use "ctrl+b d" to return to shell.\n'
-	string+='# Type "'"${scriptname}"' -k" to disable all bots and service.\n'
+	string+='# Type "'$(basename "${scriptname}")' -k" to disable all bots and restart service.\n'
 	string+='-----\n'
 	printf -- "${string}"
 	
-	local count=0
 	for bot in "${bots[@]}"; do		
 		local error=0
 	
@@ -586,8 +590,6 @@ function _autostart {
 			local bot_name=$(echo "${bot}" | grep -o -E 'sqlite(.*)sqlite' | sed 's#.sqlite##' | sed 's#sqlite:///##')
 			
 			string=''
-			string+='# FREQTRADE:\n'
-			string+='-\n'
 			string+='# '"${bot}"'\n'
 			string+='-\n'
 			printf -- "${string}"  
@@ -637,11 +639,12 @@ function _autostart {
 				sudo /usr/bin/tmux new -s "${bot_name}" -d	
 				sudo /usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" Enter
 				sudo /usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" Enter
+				# exec bot to close session if script stops 
 				sudo /usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" Enter
 				
 				_tmux_session "${bot_name}"
-				if [ "$?" -eq 0 ] ; then
-					local count=$((count+1))
+				if [[ "$?" -eq 0 ]]; then
+					# double check if tmux session started, no guarantee that bot is actually running
 					echo '# Freqtrade "'"${bot_name}"'" started.'
 				fi
 			fi
@@ -650,13 +653,28 @@ function _autostart {
 		fi
 	done
 	
-	if [[ "${count}" == 0 ]]; then
-		echo '# WARNING: No freqtrate active bots found. Edit "'"${autostart}"'" file.'
-	else
-		echo '# There are "'"${count}"'" active freqtrade bots.'
-	fi
+	# count the number of bot and proxy tmux sessions
+	_autostart_check
+	
 	echo '-----'
 	_stats
+}
+
+function _autostart_check {
+	local count_bots=$(tmux list-panes | wc -l)
+	
+	if [[ _tmux_session "${proxy}" ]]; then
+		local check_proxy=' and 1 "'"${proxy}"'"'
+		$((count_bots-1))
+	fi
+	
+	if [[ "${count_bots}" <= 0 ]]; then
+		echo '# WARNING: No active bots found. Review "'"${autostart}"'" file, one bot per line!'
+		return 1
+	else
+		echo '# There are "'"${count_bots}"'" active freqtrade bots'"${check_proxy}"'.'
+		return 0
+	fi
 }
 
 function _kill {
@@ -664,7 +682,9 @@ function _kill {
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
 		# trying to gracefully stop all bots; https://unix.stackexchange.com/a/568928 
 		tmux list-panes -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c &
+		# a hundred tries are enough
 		((c++)) && ((c==100)) && break
+		# give it a little bit of time
 		sleep 0.1
 	done
 	if [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; then
@@ -672,10 +692,11 @@ function _kill {
 		tmux kill-server 2>/dev/null
 	fi
 	_service_disable
-	echo "# All bots stopped and restart service disabled."
+	echo "# WARNING: All bots stopped and restart service is disabled."
 }
 
 function _stats {
+	# some handy stats to get you an impression how your server compares to the current possibly best location for binance
 	local ping=$(ping -c 1 -w15 api3.binance.com | awk -F '/' 'END {print $5}')
 	local mem_free=$(free -m | awk 'NR==2{print $4}')
 	local mem_total=$(free -m | awk 'NR==2{print $2}')
