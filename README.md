@@ -54,11 +54,12 @@ Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:
    ```sh
    ./freqstart.sh
    ```
-4. Edit `autostart.txt` and run `freqstart.sh` again
+5. Edit `autostart.txt` and run `freqstart.sh` again
    ```txt
    ./autostart.txt
+   ```
    
-   `REMEMBER:`
+### REMEMBER:
    *bot command has to start with 'freqstart' and rest will be ignored
    *you can use any symbol to exclude lines
    *use absolute paths to strategies and configs
@@ -66,7 +67,6 @@ Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:
    *add your strategies and configs with keys at the end of the line but before 'proxy.json'
    *freqstart only manages the installation and start of bots and no files and functions are altered
    *read the disclaimer...
-   ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
