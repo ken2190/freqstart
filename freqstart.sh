@@ -1,5 +1,6 @@
 #!/bin/bash
 clear
+# https://github.com/berndhofer/freqstart
 #
 # Since this is a small project where I taught myself some bash scripts,
 # you are welcome to improve the code. If you just use the script and like it,
@@ -14,10 +15,12 @@ clear
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly service='freqstart.service'
 readonly proxy='binance-proxy'
+readonly autostart="${scriptpath}"'/autostart.txt'
 
-readonly freqtrade_repo=('freqtrade' 'freqtrade/freqtrade')
-readonly nfi_repo=('NostalgiaForInfinity' 'iterativv/NostalgiaForInfinity')
-readonly proxy_repo=('binance-proxy' 'nightshift2k/binance-proxy')
+# freqstart does not include any forked code and we grab the latest or specific version from each git repo as needed
+readonly freqtrade_repo=('freqtrade' 'freqtrade/freqtrade') # https://github.com/freqtrade/freqtrade
+readonly nfi_repo=('NostalgiaForInfinity' 'iterativv/NostalgiaForInfinity') # https://github.com/iterativv/NostalgiaForInfinity
+readonly proxy_repo=('binance-proxy' 'nightshift2k/binance-proxy') # https://github.com/nightshift2k/binance-proxy
 readonly git_repos=(
   freqtrade_repo[@]
   nfi_repo[@]
@@ -35,12 +38,16 @@ function _date {
 	echo $(date +%y%m%d%H)
 }
 
+function _invalid {
+	echo '# ERROR: Invalid response! Better stop here if you can not read anyway...'
+}
+
 function _path {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
 	
 	path="${1}"
 	if [[ -z $(echo "${path}" | grep -o '/') ]]; then
-		# because we are lazy; set the scriptpath
+		# because we are lazy, set the scriptpath if no directory is found
 		path="${scriptpath}"'/'"${path}"
 	fi
 	path_name=$(basename "${path}" | sed 's#_.*##')
@@ -83,7 +90,7 @@ function _git_repo {
 			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_date)"'.json'
 			git_archive='https://github.com/'"${git_value}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
 			
-			# we only return 0
+			# we only return 0 and that cost me 3h to figure it out
 			return 0
 		fi
 	done
@@ -97,20 +104,26 @@ function _git_archive {
 			rm -rf "${path}"
 			_git_download "${git_archive}"
 		else
-			# less verbose; echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
+			# less verbose; echo '# "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
 			return 0
 		fi
 	fi
 }
 
 function _git_latest {
-	path_latest=$(ls -d "${scriptpath}"/"${path_name}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
+	path_latest=$(ls -d "${path}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
+	# somethimes you quit an installation and want to resume it
+	path_previous=''
+	if [[ ! -z "${path_latest}" ]]; then
+		path_previous=$(ls -d "${path}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -2 | tail -1)
+	fi	
 	path_latest_version=$(basename "${path_latest}" | sed 's#.*_##')
 
 	_git_latest_version
 	if [[ "$?" -eq 0 ]]; then
+		# what is an easier version check if a string just has to be the same
 		if [[ "${path_latest_version}" == "${git_latest_version}" ]]; then
-			echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
+			echo '# "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
 			
 			path_version="${path_latest_version}"
 			path="${path}"'_'"${path_version}"
@@ -129,6 +142,7 @@ function _git_latest {
 				| sed 's/"tarball_url": "//' \
 				| sed 's/"//')
 			
+			# downloading the precompiled linux version if available as a workaround for the proxy
 			if [[ ! -z "${browser_download_url}" ]]; then
 				local git_latest_file="${browser_download_url}"
 			else
@@ -136,7 +150,8 @@ function _git_latest {
 			fi
 				
 			_git_download "${git_latest_file}"
-		fi	
+		fi
+	# so basically we could not get a new version but we try it with the one that worked before
 	elif [[ ! -z "${path_latest_version}" ]]; then
 		echo '# WARNING: "'"${path_name}"'" latest git version not found. Trying local version "${path_latest_version}" instead.'
 
@@ -151,6 +166,7 @@ function _git_latest {
 }
 
 function _git_latest_version {
+	# we chache that info for 1h to avoid spamming git
 	if [[ ! -f "${git_latest_tmp}" ]]; then
 		curl -o "${git_latest_tmp}" -s -L "${git_latest}"
 	fi
@@ -190,7 +206,7 @@ function _git_download {
 		# switched to 1h checks; rm -f "${git_latest_tmp}"
 
 		if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
-			echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
+			echo '# "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
 			return 0
 		else
 			echo '# FATAL: "'"${path_name}"'" version "'"${path_version}"'" download failed. Retry again!'
@@ -211,8 +227,9 @@ function _strategy {
 		if [[ "$?" -eq 0 ]]; then
 			_git_latest_version
 			if [[ "$?" -eq 0 ]]; then
+				# we are all to lazy to check some git repo for a newer version that plays with our money
 				if [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
-					echo '# INFO: Newer "'"${path_name}"'" version "'"${git_latest_version}"'" available.'
+					echo '# Newer "'"${path_name}"'" version "'"${git_latest_version}"'" available.'
 				fi
 			fi
 			return 0
@@ -234,8 +251,9 @@ function _apt {
 		string+='Installed unattended-upgrades. Remove file to update server again.'
 		printf "${string}" > "${scriptpath}/update.txt";
 		
-		# update your environment
+		# update your environment for safety and get prerequisites, thanks to TheJuice
 		sudo apt update && \
+		sudo apt install -y python3-pip python3-venv python3-dev python3-pandas git curl && \
 		sudo apt -o Dpkg::Options::="--force-confdef" dist-upgrade -y && \
 		sudo apt install -y unattended-upgrades && \
 		sudo apt autoremove -y && \
@@ -251,38 +269,100 @@ function _freqtrade {
 	if [[ "$?" -eq 0 ]]; then
 		_freqtrade_installed
 		if [[ "$?" -eq 1 ]]; then
-
-			sudo chmod +x "${path}/setup.sh"
-			
-			echo '# INFO: Installing "'"${path_name}"'" may take some time, please be patient...'
-			cd "${path}"
-			yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
-				
-			echo '# INFO: Installing "pandas-ta" may take some time, please be patient...'
-			cd "${path}"
-			_env_deactivate
-			python3 -m venv .env >/dev/null 2>&1
-			source .env/bin/activate
-			python3 -m pip install --upgrade pip >/dev/null 2>&1
-			python3 -m pip install -e . >/dev/null 2>&1
-			pip install pandas-ta >/dev/null 2>&1
-			_env_deactivate
-					
-			_freqtrade_installed
-			if [[ "$?" -eq 1 ]]; then				
-				sudo rm -rf "${path}"
-				echo '# ERROR: "'"${path_name}"'" not installed. Restart script!'
-				exit 1
-			else
-				echo '# INFO: "'"${path_name}"'" install finished.'
-				return 0
+			if [[ ! -z "${path_latest_version}" ]]; then
+				while true; do
+					echo '-----'
+					read -p '# Stop all bots and install newer "'"${path_name}"'" version "'"${git_latest_version}"'" and copy sqlite databases? (y/n) ' _yn
+					case ${_yn} in 
+						[yY])
+							# if you have any custom stuff done, you better check manually
+							_freqtrade_update
+							break;;
+						[nN])
+							break;;
+						*)
+							_invalid
+							;;
+					esac
+				done
 			fi
+			_freqtrade_setup
 		else
-			# less verbose; echo '# INFO: "'"${path_name}"'" is already installed.'
+			# less verbose; echo '# "'"${path_name}"'" is already installed.'
 			return 0
 		fi
 	else
 		return 1
+	fi
+}
+
+function _freqtrade_update {
+	_kill
+	
+	# get that precious sqlite databases into the newest install
+	if [[ ! -z "${path_previous}" ]]; then
+		local path_latest="${path_previous}"
+	fi
+	
+	if [[ ! -z $(find "${path_latest}" -type f | grep 'sqlite$') ]]; then
+		echo '# Copy sqlite databases from "'"${path_latest}"'" to "'"${path}"'" now:'
+
+		for sqlite_path in $(find "${path_latest}" -type f | grep 'sqlite$'); do
+
+			# copy files with -a so they keep their metadata
+			cp -a "${sqlite_path}" "${path}"
+			
+			local sqlite_file=$(basename "${sqlite_path}")
+			
+			# check if copy actually exists and exit if there is a problem
+			if [[ -f "${path}/${sqlite_file}" ]]; then
+				echo '- "'"${sqlite_file}"'" copied...'
+			else				
+				sudo rm -rf "${path}"
+				echo '# ERROR: Can not popy sqlite databases. Retry again!'
+				exit 1
+			fi
+		done
+		return 0
+	else
+		# so you installed it and did not do anything until this release, better git pull freqstart too
+		echo '# No sqlite databases in "'"${path_latest}"'" found.'
+		return 0
+	fi
+}
+
+function _freqtrade_setup {
+	# i prefer it bare instead of docker
+	sudo chmod +x "${path}/setup.sh"
+	
+	echo '# Installing "'"${path_name}"'" may take some time, please be patient...'
+	cd "${path}"
+	# yes means no and no means i dont want that extra stuff to be installed
+	yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
+	
+	# actually dont know if pandas-ta comes with the setup, but try to install it anyway
+	echo '# Installing "pandas-ta" may take some time, please be patient...'
+	
+	cd "${path}"
+	_env_deactivate
+	python3 -m venv .env >/dev/null 2>&1
+	source .env/bin/activate
+	python3 -m pip install --upgrade pip >/dev/null 2>&1
+	python3 -m pip install -e . >/dev/null 2>&1
+	pip install pandas-ta >/dev/null 2>&1
+	_env_deactivate
+			
+	_freqtrade_installed
+	if [[ "$?" -eq 1 ]]; then	
+		# if somethings not right, better delete it
+		sudo rm -rf "${path}"
+		echo '# ERROR: "'"${path_name}"'" not installed. Retry again!'
+		exit 1
+	else
+		# phew, we made it
+		echo '# "'"${path_name}"'" version "'"${path_version}"'" successfully installed.'
+		echo '-'		
+		return 0
 	fi
 }
 
@@ -303,6 +383,7 @@ function _config {
 	if [[ ! -z $(echo "${config}" | grep -e '-c=' -e '--config=') ]]; then
 		local config=$(echo "${config}" | sed 's#-c=##' | sed 's#--config=##')
 		if [[ ! -f "${config}" ]]; then
+			# so you basically dont know where you saved your api keys on a foreign could infrastructure, great...
 			echo '# ERROR: Config "'"${config}"'" not found.'
 			return 1
 		else
@@ -312,6 +393,7 @@ function _config {
 }
 
 function _tmux {
+	# screen is lame
 	if [[ ! -x "$(command -v tmux)" ]]; then
 		sudo apt-get update -y >/dev/null
 		sudo apt-get install -y tmux >/dev/null
@@ -362,11 +444,11 @@ function _proxy_json {
 			echo '# ERROR: Can not create "'"${path_name}"'" config.'
 			exit 1
 		else
-			echo '# INFO: "'"${path_name}"'" config created.'
+			echo '# "'"${path_name}"'" config created.'
 			return 0
 		fi
 	else
-		# less verbose; echo '# INFO: "'"${path_name}"'" config found.'
+		# less verbose; echo '# "'"${path_name}"'" config found.'
 		return 0
 	fi
 }
@@ -382,11 +464,11 @@ function _proxy_tmux {
 			echo '# ERROR: Can not start "'"${path_name}"'" tmux session.'
 			return 1
 		else
-			echo '# INFO: New "'"${path_name}"'" tmux session startet.'
+			echo '# New "'"${path_name}"'" tmux session startet.'
 			return 0
 		fi
 	else
-		# less verbose; echo '# INFO: "'"${path_name}"'" tmux session is running.'
+		# less verbose; echo '# "'"${path_name}"'" tmux session is running.'
 		return 0
 	fi
 }
@@ -396,7 +478,7 @@ function _proxy {
 	if [ "$?" -eq 0 ] ; then
 
 		if [[ ! -z "${git_latest_version}" ]] && [[ "${git_latest_version}" != "${path_latest_version}" ]]; then
-			echo '# INFO: New "'"${path_name}"'" "'"${path_version}"'" has been downloaded.'
+			echo '# New "'"${path_name}"'" "'"${path_version}"'" has been downloaded.'
 			
 			if [[ ! -x "${path}"'/'"${path_name}" ]]; then
 				sudo chmod +x "${path}"'/'"${path_name}"
@@ -414,6 +496,7 @@ function _proxy {
 }
 
 function _service_disable {
+	# on your own now, cowboy
 	if [[ ! -z "${service}" ]]; then			
 		sudo rm -f "${scriptpath}/${service}"
 		sudo systemctl stop "${service}" &>/dev/null
@@ -425,6 +508,7 @@ function _service_disable {
 }
 
 function _service_enable {
+	# we keep it running, hopefully
 	if [[ ! -z "${service}" ]]; then			
 		sudo systemctl daemon-reload &>/dev/null
 		sudo systemctl reset-failed &>/dev/null
@@ -470,7 +554,7 @@ function _service {
 }
 
 function _ntp {
-	# dont run any bots on unsynced servers, also perfer UTC for binance
+	# dont run any bots on unsynced servers, also perfer UTC for binance and im forcing you to it now
 	local timentp=$(timedatectl | grep -q 'NTP service: active')
 	local timeutc=$(timedatectl | grep -q 'Time zone: UTC (UTC, +0000)')
 	local timesyn=$(timedatectl | grep -q 'System clock synchronized: yes')
@@ -489,16 +573,17 @@ function _ntp {
 }
 
 function _autostart {
+	# a proxy a day, keeps the ip ban away
 	_proxy
 	
-	local autostart="${scriptpath}/autostart.txt"
+	# we grab the latest local freqtrade version, do not alter those folder names and version numbers
 	local freqtrade=$(ls -d "${scriptpath}"/freqtrade_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
 
 	if [[ ! -f "${autostart}" ]]; then
 		string=''
 		string+='# EXAMPLE:\n'
 		string+='# freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000 -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json -c='"${scriptpath}"'/proxy.json\n'		
-		string+='# INFO: To test new strategies including dryrun, create a sandbox account with API credentials -> https://testnet.binance.vision/'
+		string+='# To test new strategies including dryrun, create a sandbox account with API credentials -> https://testnet.binance.vision/'
 		printf "${string}" > "${autostart}"
 		
 		if [[ ! -f "${autostart}" ]]; then
@@ -506,35 +591,39 @@ function _autostart {
 			exit 1
 		fi
 	fi
-
-	set -f; readarray -t bots < "${autostart}"
+	
+	# grab that list of bots
+	readarray -t bots < "${autostart}"
 
 	string=''
 	string+='-----\n'
-	string+='# Starting FREQTRADE bots...\n'
+	string+='# Starting Freqtrade Trading Bots...\n'
 	string+='-----\n'
 	string+='# Type "tmux a" to attach to latest TMUX session.\n'
 	string+='# Use "ctrl+b s" to switch between TMUX sessions.\n'
 	string+='# Use "ctrl+b d" to return to shell.\n'
-	string+='# Type "'"${scriptname}"' -k" to disable all bots and service.\n'
+	string+='# Type "'$(basename "${scriptname}")' -k" to disable all bots and restart service.\n'
 	string+='-----\n'
 	printf -- "${string}"
 	
-	local count=0
+	# since you probably did some nono, we double check it for you
 	for bot in "${bots[@]}"; do		
 		local error=0
 	
 		if [[ ! -z $(echo "${bot}" | grep -o -E '^freqtrade') ]]; then
+			# we give it a name if you have not
 			local bot_name=$(echo "${bot}" | grep -o -E 'sqlite(.*)sqlite' | sed 's#.sqlite##' | sed 's#sqlite:///##')
+			if [[ -z "${bot_name}" ]]; then
+				local bot_name='Set database URL name!'
+			fi
 			
 			string=''
-			string+='# FREQTRADE:\n'
-			string+='-\n'
-			string+='# '"${bot}"'\n'
+			string+='# Starting "'"${bot_name}"'"\n'
+			# less verbose; string+="${bot}"'\n'
 			string+='-\n'
 			printf -- "${string}"  
 
-			set -f; local arguments=("${bot}") # its working, dont know why; https://stackoverflow.com/a/15400047
+			local arguments=("${bot}") # its working, dont know why; set -f ? https://stackoverflow.com/a/15400047
 			for argument in ${arguments[@]}; do
 
 				_config "${argument}"
@@ -576,37 +665,63 @@ function _autostart {
 			fi
 
 			if [[ "${error}" -eq 0 ]]; then
-				sudo /usr/bin/tmux new -s "${bot_name}" -d	
-				sudo /usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" Enter
-				sudo /usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" Enter
-				sudo /usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" Enter
+				# exec bot to close session if script stops 
+				/usr/bin/tmux new -s "${bot_name}" -d
+				/usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" C-m
+				/usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" C-m
+				/usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" C-m
 				
 				_tmux_session "${bot_name}"
-				if [ "$?" -eq 0 ] ; then
-					local count=$((count+1))
-					echo '# INFO: Freqtrade "'"${bot_name}"'" started.'
+				if [[ "$?" -eq 0 ]]; then
+					# double check if tmux session started, no guarantee that the bot is actually running
+					echo '# SUCCCESS: Bot "'"${bot_name}"'" started.'
+				else
+					echo '# ERROR: Bot "'"${bot_name}"'" not started. Review '"${autostart}"'!'
 				fi
 			fi
-			
 			echo '-----'
 		fi
 	done
 	
-	if [[ "${count}" == 0 ]]; then
-		echo '# WARNING: No freqtrate active bots found. Edit "'"${autostart}"'" file.'
-	else
-		echo '# INFO: There are "'"${count}"'" active freqtrade bots.'
-	fi
+	# tripple check if bot and proxy tmux sessions actually started, because even software can tell you lies
+	_autostart_check
+
 	echo '-----'
-	_stats
+	_autostart_stats
+}
+
+function _autostart_check {
+	# count the number of bot and proxy tmux sessions, so you dont have to stress your fingers
+	local count_bots=$(tmux list-panes | wc -l)
+	# plus one because tmux can not count
+	local count_bots="$((count_bots + 1))"
+
+	_tmux_session "${proxy}"
+	if [[ "$?" -eq 0 ]]; then
+		local check_proxy=' and (1) "'"${proxy}"'"'
+		local count_bots="$((count_bots - 1))"
+	else
+		local check_proxy=' but no "'"${proxy}"'"'
+	fi
+
+	if (( "$((count_bots))" <= 0 )); then
+		echo '# WARNING: No active bots found. Review "'"${autostart}"'" file and remeber: one bot per line!'
+		#return 1
+	else
+		echo '# There are ('"$((count_bots))"') active "freqtrade" bots'"${check_proxy}"'.'
+		#return 0
+	fi
 }
 
 function _kill {
-	tmux kill-session -t "${proxy}"
+	echo '# WARNING: Starting the purge, please be patient...'
+	tmux kill-session -t "${proxy}" 2>/dev/null
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
 		# trying to gracefully stop all bots; https://unix.stackexchange.com/a/568928 
 		tmux list-panes -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c &
+		# a hundred tries are enough
 		((c++)) && ((c==100)) && break
+		# give it a little bit of time
 		sleep 0.1
 	done
 	if [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; then
@@ -614,10 +729,11 @@ function _kill {
 		tmux kill-server 2>/dev/null
 	fi
 	_service_disable
-	echo "# INFO: All bots stopped and restart service disabled."
+	echo "# WARNING: All bots stopped and restart service is disabled."
 }
 
-function _stats {
+function _autostart_stats {
+	# some handy stats to get you an impression how your server compares to the current possibly best location for binance
 	local ping=$(ping -c 1 -w15 api3.binance.com | awk -F '/' 'END {print $5}')
 	local mem_free=$(free -m | awk 'NR==2{print $4}')
 	local mem_total=$(free -m | awk 'NR==2{print $2}')
@@ -632,6 +748,7 @@ function _stats {
 }
 
 function _start {
+	# the sequence does matter for apt and autostart
 	_apt
 	_tmux
 	_ntp
@@ -660,6 +777,7 @@ if [[ ! -z "$*" ]]; then
 		esac
 	done
 else
+	# so here we are, even starting it automatically for you, so you dont have to even type some additional commands
 	_start
 fi
 
