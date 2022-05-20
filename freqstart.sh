@@ -593,7 +593,7 @@ function _autostart {
 	fi
 	
 	# grab that list of bots
-	set -f; readarray -t bots < "${autostart}"
+	readarray -t bots < "${autostart}"
 
 	string=''
 	string+='-----\n'
@@ -611,14 +611,19 @@ function _autostart {
 		local error=0
 	
 		if [[ ! -z $(echo "${bot}" | grep -o -E '^freqtrade') ]]; then
+			# we give it a name if you have not
 			local bot_name=$(echo "${bot}" | grep -o -E 'sqlite(.*)sqlite' | sed 's#.sqlite##' | sed 's#sqlite:///##')
+			if [[ -z "${bot_name}" ]]; then
+				local bot_name='Set database URL name!'
+			fi
 			
 			string=''
-			string+='# '"${bot}"'\n'
+			string+='# Starting "'"${bot_name}"'"\n'
+			# less verbose; string+="${bot}"'\n'
 			string+='-\n'
 			printf -- "${string}"  
 
-			set -f; local arguments=("${bot}") # its working, dont know why; https://stackoverflow.com/a/15400047
+			local arguments=("${bot}") # its working, dont know why; set -f ? https://stackoverflow.com/a/15400047
 			for argument in ${arguments[@]}; do
 
 				_config "${argument}"
@@ -661,49 +666,55 @@ function _autostart {
 
 			if [[ "${error}" -eq 0 ]]; then
 				# exec bot to close session if script stops 
-				/usr/bin/tmux new -s "${bot_name}" -d	
-				/usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" Enter
-				/usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" Enter
-				/usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" Enter
+				/usr/bin/tmux new -s "${bot_name}" -d
+				/usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" C-m
+				/usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" C-m
+				/usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" C-m
 				
 				_tmux_session "${bot_name}"
 				if [[ "$?" -eq 0 ]]; then
 					# double check if tmux session started, no guarantee that the bot is actually running
-					echo '# Bot "'"${bot_name}"'" started.'
+					echo '# SUCCCESS: Bot "'"${bot_name}"'" started.'
+				else
+					echo '# ERROR: Bot "'"${bot_name}"'" not started. Review '"${autostart}"'!'
 				fi
 			fi
-			
 			echo '-----'
 		fi
 	done
 	
 	# tripple check if bot and proxy tmux sessions actually started, because even software can tell you lies
 	_autostart_check
-	
+
 	echo '-----'
-	_stats
+	_autostart_stats
 }
 
 function _autostart_check {
 	# count the number of bot and proxy tmux sessions, so you dont have to stress your fingers
 	local count_bots=$(tmux list-panes | wc -l)
-	local count_bots="$((count_bots))"
+	# plus one because tmux can not count
+	local count_bots="$((count_bots + 1))"
 
 	_tmux_session "${proxy}"
 	if [[ "$?" -eq 0 ]]; then
-		local check_proxy=' and 1 "'"${proxy}"'"'
+		local check_proxy=' and (1) "'"${proxy}"'"'
 		local count_bots="$((count_bots - 1))"
-	fi	
+	else
+		local check_proxy=' but no "'"${proxy}"'"'
+	fi
+
 	if (( "$((count_bots))" <= 0 )); then
 		echo '# WARNING: No active bots found. Review "'"${autostart}"'" file and remeber: one bot per line!'
-		return 1
+		#return 1
 	else
-		echo '# There are "'"$((count_bots))"'" active freqtrade bots'"${check_proxy}"'.'
-		return 0
+		echo '# There are ('"$((count_bots))"') active "freqtrade" bots'"${check_proxy}"'.'
+		#return 0
 	fi
 }
 
 function _kill {
+	echo '# WARNING: Starting the purge, please be patient...'
 	tmux kill-session -t "${proxy}" 2>/dev/null
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
 		# trying to gracefully stop all bots; https://unix.stackexchange.com/a/568928 
@@ -721,7 +732,7 @@ function _kill {
 	echo "# WARNING: All bots stopped and restart service is disabled."
 }
 
-function _stats {
+function _autostart_stats {
 	# some handy stats to get you an impression how your server compares to the current possibly best location for binance
 	local ping=$(ping -c 1 -w15 api3.binance.com | awk -F '/' 'END {print $5}')
 	local mem_free=$(free -m | awk 'NR==2{print $4}')
