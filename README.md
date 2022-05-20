@@ -69,6 +69,12 @@ Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:<br/
 6. freqstart only manages the installation and start of bots and no files and functions are altered
 7. read the disclaimer...
 
+Example bot command, one per line and dont forget to change the version numbers
+```txt
+   freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path=/root/freqstart/NostalgiaForInfinity_v00.0.000 -c=/root/freqstart/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c=/root/freqstart/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c=/root/freqstart/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json -c=/root/freqstart/proxy.json<br>
+   # some comment will be ignored<br>
+   freqtrade trade --dry-run --db-url sqlite:///example2.sqlite --strategy=NostalgiaForInfinityX --strategy-path=/root/freqstart/NostalgiaForInfinity_v00.0.000 -c=/root/freqstart/everything-in-one-config.json
+
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 <!-- ROADMAP -->
