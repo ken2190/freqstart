@@ -5,7 +5,8 @@
 
 Freqstart simplifies the usage of freqtrade with NostalgiaForInfinity strategies.
 Just copy your commands into a text file and freqstart will take care of the rest.
-Freqstart will start your bots in separate TMUX sessions and will try to restart them after a system reboot. 
+Freqstart will start your bots in separate TMUX sessions and will try to restart them after a system reboot.
+You could start a hundred bots with different strategies and versions in one click.
 
 [![Freqstart Screen Shot][product-screenshot]]
 
@@ -33,7 +34,6 @@ If you are not familiar with freqtrade, please read the complete documentation f
 This project is beeing developed and testet on Vultr "Tokyo" Server with Debian.
 
 Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:
-
 [https://www.vultr.com/?ref=9122650-8H](https://www.vultr.com/?ref=9122650-8H)
 
 ### Installation
@@ -53,6 +53,19 @@ Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:
 4. Run `freqstart.sh`
    ```sh
    ./freqstart.sh
+   ```
+4. Edit `autostart.txt` and run `freqstart.sh` again
+   ```txt
+   ./autostart.txt
+   
+   `REMEMBER:`
+   *bot command has to start with 'freqstart' and rest will be ignored
+   *you can use any symbol to exclude lines
+   *use absolute paths to strategies and configs
+   *keep 'proxy.json' alwas at the end of the line or remove it for certain bots
+   *add your strategies and configs with keys at the end of the line but before 'proxy.json'
+   *freqstart only manages the installation and start of bots and no files and functions are altered
+   *read the disclaimer...
    ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
