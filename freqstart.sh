@@ -1,5 +1,6 @@
 #!/bin/bash
 clear
+# https://github.com/berndhofer/freqstart
 #
 # Since this is a small project where I taught myself some bash scripts,
 # you are welcome to improve the code. If you just use the script and like it,
@@ -37,7 +38,7 @@ function _date {
 }
 
 function _invalid {
-	echo '# ERROR: Invalid response!'
+	echo '# ERROR: Invalid response! Better stop here if you can not read anyway...'
 }
 
 function _path {
@@ -88,7 +89,7 @@ function _git_repo {
 			git_latest_tmp='/tmp/'"${path_name}"'_'"$(_date)"'.json'
 			git_archive='https://github.com/'"${git_value}"'/archive/refs/tags/'"${path_version}"'.tar.gz'
 			
-			# we only return 0
+			# we only return 0 and that cost me 3h to figure it out
 			return 0
 		fi
 	done
@@ -110,6 +111,7 @@ function _git_archive {
 
 function _git_latest {
 	path_latest=$(ls -d "${path}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
+	# somethimes you quit an installation and want to resume it
 	path_previous=''
 	if [[ ! -z "${path_latest}" ]]; then
 		path_previous=$(ls -d "${path}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -2 | tail -1)
@@ -118,6 +120,7 @@ function _git_latest {
 
 	_git_latest_version
 	if [[ "$?" -eq 0 ]]; then
+		# what is an easier version check if a string just has to be the same
 		if [[ "${path_latest_version}" == "${git_latest_version}" ]]; then
 			echo '# "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
 			
@@ -146,7 +149,8 @@ function _git_latest {
 			fi
 				
 			_git_download "${git_latest_file}"
-		fi	
+		fi
+	# so basically we could not get a new version but we try it with the one that worked before
 	elif [[ ! -z "${path_latest_version}" ]]; then
 		echo '# WARNING: "'"${path_name}"'" latest git version not found. Trying local version "${path_latest_version}" instead.'
 
@@ -161,6 +165,7 @@ function _git_latest {
 }
 
 function _git_latest_version {
+	# we chache that info for 1h to avoid spamming git
 	if [[ ! -f "${git_latest_tmp}" ]]; then
 		curl -o "${git_latest_tmp}" -s -L "${git_latest}"
 	fi
@@ -221,6 +226,7 @@ function _strategy {
 		if [[ "$?" -eq 0 ]]; then
 			_git_latest_version
 			if [[ "$?" -eq 0 ]]; then
+				# we are all to lazy to check some git repo for a newer version that plays with our money
 				if [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
 					echo '# Newer "'"${path_name}"'" version "'"${git_latest_version}"'" available.'
 				fi
@@ -244,7 +250,7 @@ function _apt {
 		string+='Installed unattended-upgrades. Remove file to update server again.'
 		printf "${string}" > "${scriptpath}/update.txt";
 		
-		# update your environment
+		# update your environment for safety
 		sudo apt update && \
 		sudo apt -o Dpkg::Options::="--force-confdef" dist-upgrade -y && \
 		sudo apt install -y unattended-upgrades && \
@@ -267,6 +273,7 @@ function _freqtrade {
 					read -p '# Stop all bots and install newer "'"${path_name}"'" version "'"${git_latest_version}"'" and copy sqlite databases? (y/n) ' _yn
 					case ${_yn} in 
 						[yY])
+							# if you have any custom stuff done, you better check manually
 							_freqtrade_update
 							break;;
 						[nN])
@@ -316,19 +323,24 @@ function _freqtrade_update {
 		done
 		return 0
 	else
+		# so you installed it and did not do anything until this release, better git pull freqstart too
 		echo '# No sqlite databases in "'"${path_latest}"'" found.'
 		return 0
 	fi
 }
 
 function _freqtrade_setup {
+	# i prefer it bare instead of docker
 	sudo chmod +x "${path}/setup.sh"
 	
 	echo '# Installing "'"${path_name}"'" may take some time, please be patient...'
 	cd "${path}"
+	# yes means no and no means i dont want that extra stuff to be installed
 	yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
-		
+	
+	# actually dont know if pandas-ta comes with the setup, but try to install it anyway
 	echo '# Installing "pandas-ta" may take some time, please be patient...'
+	
 	cd "${path}"
 	_env_deactivate
 	python3 -m venv .env >/dev/null 2>&1
@@ -339,16 +351,17 @@ function _freqtrade_setup {
 	_env_deactivate
 			
 	_freqtrade_installed
-	if [[ "$?" -eq 1 ]]; then				
+	if [[ "$?" -eq 1 ]]; then	
+		# if somethings not right, better delete it
 		sudo rm -rf "${path}"
 		echo '# ERROR: "'"${path_name}"'" not installed. Retry again!'
 		exit 1
 	else
+		# phew, we made it
 		echo '# "'"${path_name}"'" version "'"${path_version}"'" successfully installed.'
 		echo '-'		
 		return 0
 	fi
-
 }
 
 function _freqtrade_installed {
@@ -368,6 +381,7 @@ function _config {
 	if [[ ! -z $(echo "${config}" | grep -e '-c=' -e '--config=') ]]; then
 		local config=$(echo "${config}" | sed 's#-c=##' | sed 's#--config=##')
 		if [[ ! -f "${config}" ]]; then
+			# so you basically dont know where you saved your api keys on a foreign could infrastructure, great...
 			echo '# ERROR: Config "'"${config}"'" not found.'
 			return 1
 		else
@@ -377,6 +391,7 @@ function _config {
 }
 
 function _tmux {
+	# screen is lame
 	if [[ ! -x "$(command -v tmux)" ]]; then
 		sudo apt-get update -y >/dev/null
 		sudo apt-get install -y tmux >/dev/null
@@ -479,6 +494,7 @@ function _proxy {
 }
 
 function _service_disable {
+	# on your own now, cowboy
 	if [[ ! -z "${service}" ]]; then			
 		sudo rm -f "${scriptpath}/${service}"
 		sudo systemctl stop "${service}" &>/dev/null
@@ -490,6 +506,7 @@ function _service_disable {
 }
 
 function _service_enable {
+	# we keep it running, hopefully
 	if [[ ! -z "${service}" ]]; then			
 		sudo systemctl daemon-reload &>/dev/null
 		sudo systemctl reset-failed &>/dev/null
@@ -535,7 +552,7 @@ function _service {
 }
 
 function _ntp {
-	# dont run any bots on unsynced servers, also perfer UTC for binance
+	# dont run any bots on unsynced servers, also perfer UTC for binance and im forcing you to it now
 	local timentp=$(timedatectl | grep -q 'NTP service: active')
 	local timeutc=$(timedatectl | grep -q 'Time zone: UTC (UTC, +0000)')
 	local timesyn=$(timedatectl | grep -q 'System clock synchronized: yes')
@@ -587,6 +604,7 @@ function _autostart {
 	string+='-----\n'
 	printf -- "${string}"
 	
+	# since you probably did some nono, we double check it for you
 	for bot in "${bots[@]}"; do		
 		local error=0
 	
@@ -648,8 +666,8 @@ function _autostart {
 				
 				_tmux_session "${bot_name}"
 				if [[ "$?" -eq 0 ]]; then
-					# double check if tmux session started, no guarantee that bot is actually running
-					echo '# Freqtrade "'"${bot_name}"'" started.'
+					# double check if tmux session started, no guarantee that the bot is actually running
+					echo '# Bot "'"${bot_name}"'" started.'
 				fi
 			fi
 			
@@ -657,7 +675,7 @@ function _autostart {
 		fi
 	done
 	
-	# count the number of bot and proxy tmux sessions
+	# tripple check if bot and proxy tmux sessions actually started, because even software can tell you lies
 	_autostart_check
 	
 	echo '-----'
@@ -665,7 +683,7 @@ function _autostart {
 }
 
 function _autostart_check {
-	# tripple check if bot and proxy tmux sessions actually started
+	# count the number of bot and proxy tmux sessions, so you dont have to stress your fingers
 	local count_bots=$(tmux list-panes | wc -l)
 	local count_bots="$((count_bots))"
 
@@ -717,6 +735,7 @@ function _stats {
 }
 
 function _start {
+	# the sequence does matter for apt and autostart
 	_apt
 	_tmux
 	_ntp
@@ -745,6 +764,7 @@ if [[ ! -z "$*" ]]; then
 		esac
 	done
 else
+	# so here we are, even starting it automatically for you, so you dont have to even type some additional commands
 	_start
 fi
 
