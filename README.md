@@ -59,14 +59,15 @@ Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:
    ./autostart.txt
    ```
    
-### REMEMBER:
-   *bot command has to start with 'freqstart' and rest will be ignored
-   *you can use any symbol to exclude lines
-   *use absolute paths to strategies and configs
-   *keep 'proxy.json' alwas at the end of the line or remove it for certain bots
-   *add your strategies and configs with keys at the end of the line but before 'proxy.json'
-   *freqstart only manages the installation and start of bots and no files and functions are altered
-   *read the disclaimer...
+### Autostart
+
+1. bot command has to start with 'freqstart' and rest will be ignored
+2. you can use any symbol to exclude lines
+3. use absolute paths to strategies and configs
+4. keep 'proxy.json' alwas at the end of the line or remove it for certain bots
+5. add your strategies and configs with keys at the end of the line but before 'proxy.json'
+6. freqstart only manages the installation and start of bots and no files and functions are altered
+7. read the disclaimer...
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
