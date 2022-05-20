@@ -15,9 +15,10 @@ readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}
 readonly service='freqstart.service'
 readonly proxy='binance-proxy'
 
-readonly freqtrade_repo=('freqtrade' 'freqtrade/freqtrade')
-readonly nfi_repo=('NostalgiaForInfinity' 'iterativv/NostalgiaForInfinity')
-readonly proxy_repo=('binance-proxy' 'nightshift2k/binance-proxy')
+# freqstart does not include any forked code and we grab the latest or specific version from each git repo as needed
+readonly freqtrade_repo=('freqtrade' 'freqtrade/freqtrade') # https://github.com/freqtrade/freqtrade
+readonly nfi_repo=('NostalgiaForInfinity' 'iterativv/NostalgiaForInfinity') # https://github.com/iterativv/NostalgiaForInfinity
+readonly proxy_repo=('binance-proxy' 'nightshift2k/binance-proxy') # https://github.com/nightshift2k/binance-proxy
 readonly git_repos=(
   freqtrade_repo[@]
   nfi_repo[@]
@@ -137,6 +138,7 @@ function _git_latest {
 				| sed 's/"tarball_url": "//' \
 				| sed 's/"//')
 			
+			# downloading the precompiled linux version if available as a workaround for the proxy
 			if [[ ! -z "${browser_download_url}" ]]; then
 				local git_latest_file="${browser_download_url}"
 			else
@@ -552,6 +554,7 @@ function _ntp {
 }
 
 function _autostart {
+	# a proxy a day, keeps the ip ban away
 	_proxy
 	
 	local autostart="${scriptpath}/autostart.txt"
@@ -569,7 +572,8 @@ function _autostart {
 			exit 1
 		fi
 	fi
-
+	
+	# grab that list of bots
 	set -f; readarray -t bots < "${autostart}"
 
 	string=''
@@ -636,11 +640,11 @@ function _autostart {
 			fi
 
 			if [[ "${error}" -eq 0 ]]; then
-				sudo /usr/bin/tmux new -s "${bot_name}" -d	
-				sudo /usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" Enter
-				sudo /usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" Enter
 				# exec bot to close session if script stops 
-				sudo /usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" Enter
+				/usr/bin/tmux new -s "${bot_name}" -d	
+				/usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" Enter
+				/usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" Enter
+				/usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" Enter
 				
 				_tmux_session "${bot_name}"
 				if [[ "$?" -eq 0 ]]; then
@@ -661,18 +665,20 @@ function _autostart {
 }
 
 function _autostart_check {
+	# tripple check if bot and proxy tmux sessions actually started
 	local count_bots=$(tmux list-panes | wc -l)
-	
-	if [[ _tmux_session "${proxy}" ]]; then
+	local count_bots="$((count_bots))"
+
+	_tmux_session "${proxy}"
+	if [[ "$?" -eq 0 ]]; then
 		local check_proxy=' and 1 "'"${proxy}"'"'
-		$((count_bots-1))
-	fi
-	
-	if [[ "${count_bots}" <= 0 ]]; then
+		local count_bots="$((count_bots - 1))"
+	fi	
+	if (( "$((count_bots))" <= 0 )); then
 		echo '# WARNING: No active bots found. Review "'"${autostart}"'" file, one bot per line!'
 		return 1
 	else
-		echo '# There are "'"${count_bots}"'" active freqtrade bots'"${check_proxy}"'.'
+		echo '# There are "'"$((count_bots))"'" active freqtrade bots'"${check_proxy}"'.'
 		return 0
 	fi
 }
