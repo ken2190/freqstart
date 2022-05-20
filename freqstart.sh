@@ -15,6 +15,7 @@ clear
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly service='freqstart.service'
 readonly proxy='binance-proxy'
+readonly autostart="${scriptpath}"'/autostart.txt'
 
 # freqstart does not include any forked code and we grab the latest or specific version from each git repo as needed
 readonly freqtrade_repo=('freqtrade' 'freqtrade/freqtrade') # https://github.com/freqtrade/freqtrade
@@ -250,8 +251,9 @@ function _apt {
 		string+='Installed unattended-upgrades. Remove file to update server again.'
 		printf "${string}" > "${scriptpath}/update.txt";
 		
-		# update your environment for safety
+		# update your environment for safety and get prerequisites, thanks to TheJuice
 		sudo apt update && \
+		sudo apt install -y python3-pip python3-venv python3-dev python3-pandas git curl && \
 		sudo apt -o Dpkg::Options::="--force-confdef" dist-upgrade -y && \
 		sudo apt install -y unattended-upgrades && \
 		sudo apt autoremove -y && \
@@ -574,7 +576,7 @@ function _autostart {
 	# a proxy a day, keeps the ip ban away
 	_proxy
 	
-	local autostart="${scriptpath}/autostart.txt"
+	# we grab the latest local freqtrade version, do not alter those folder names and version numbers
 	local freqtrade=$(ls -d "${scriptpath}"/freqtrade_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
 
 	if [[ ! -f "${autostart}" ]]; then
@@ -693,7 +695,7 @@ function _autostart_check {
 		local count_bots="$((count_bots - 1))"
 	fi	
 	if (( "$((count_bots))" <= 0 )); then
-		echo '# WARNING: No active bots found. Review "'"${autostart}"'" file, one bot per line!'
+		echo '# WARNING: No active bots found. Review "'"${autostart}"'" file and remeber: one bot per line!'
 		return 1
 	else
 		echo '# There are "'"$((count_bots))"'" active freqtrade bots'"${check_proxy}"'.'
