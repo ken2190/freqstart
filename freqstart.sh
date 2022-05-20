@@ -35,6 +35,10 @@ function _date {
 	echo $(date +%y%m%d%H)
 }
 
+function _invalid {
+	echo '# ERROR: Invalid response!'
+}
+
 function _path {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
 	
@@ -97,7 +101,7 @@ function _git_archive {
 			rm -rf "${path}"
 			_git_download "${git_archive}"
 		else
-			# less verbose; echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
+			# less verbose; echo '# "'"${path_name}"'" version "'"${path_version}"'" already downloaded.'
 			return 0
 		fi
 	fi
@@ -110,7 +114,7 @@ function _git_latest {
 	_git_latest_version
 	if [[ "$?" -eq 0 ]]; then
 		if [[ "${path_latest_version}" == "${git_latest_version}" ]]; then
-			echo '# INFO: "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
+			echo '# "'"${path_name}"'" latest version "'"${git_latest_version}"'" already downloaded.'
 			
 			path_version="${path_latest_version}"
 			path="${path}"'_'"${path_version}"
@@ -190,7 +194,7 @@ function _git_download {
 		# switched to 1h checks; rm -f "${git_latest_tmp}"
 
 		if [[ -d "${path}" && ! -z "$(ls -A ${path})" ]]; then
-			echo '# INFO: "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
+			echo '# "'"${path_name}"'" version "'"${path_version}"'" downloaded.'
 			return 0
 		else
 			echo '# FATAL: "'"${path_name}"'" version "'"${path_version}"'" download failed. Retry again!'
@@ -212,7 +216,7 @@ function _strategy {
 			_git_latest_version
 			if [[ "$?" -eq 0 ]]; then
 				if [[ "${path_latest_version}" != "${git_latest_version}" ]]; then
-					echo '# INFO: Newer "'"${path_name}"'" version "'"${git_latest_version}"'" available.'
+					echo '# Newer "'"${path_name}"'" version "'"${git_latest_version}"'" available.'
 				fi
 			fi
 			return 0
@@ -251,38 +255,83 @@ function _freqtrade {
 	if [[ "$?" -eq 0 ]]; then
 		_freqtrade_installed
 		if [[ "$?" -eq 1 ]]; then
-
-			sudo chmod +x "${path}/setup.sh"
+			if [[ ! -z "${path_latest_version}" ]]; then
+				while true; do
+					echo '-----'
+					read -p '# Stop all bots and install newer "'"${path_name}"'" version "'"${git_latest_version}"'" and copy sqlite databases? (y/n) ' _yn
+					case ${_yn} in 
+						[yY])
+							_freqtrade_setup
+							break;;
+						[nN])
+							return 1;;
+						*)
+							_invalid
+							;;
+					esac
+				done
 			
-			echo '# INFO: Installing "'"${path_name}"'" may take some time, please be patient...'
-			cd "${path}"
-			yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
-				
-			echo '# INFO: Installing "pandas-ta" may take some time, please be patient...'
-			cd "${path}"
-			_env_deactivate
-			python3 -m venv .env >/dev/null 2>&1
-			source .env/bin/activate
-			python3 -m pip install --upgrade pip >/dev/null 2>&1
-			python3 -m pip install -e . >/dev/null 2>&1
-			pip install pandas-ta >/dev/null 2>&1
-			_env_deactivate
-					
-			_freqtrade_installed
-			if [[ "$?" -eq 1 ]]; then				
-				sudo rm -rf "${path}"
-				echo '# ERROR: "'"${path_name}"'" not installed. Restart script!'
-				exit 1
-			else
-				echo '# INFO: "'"${path_name}"'" install finished.'
-				return 0
 			fi
 		else
-			# less verbose; echo '# INFO: "'"${path_name}"'" is already installed.'
+			# less verbose; echo '# "'"${path_name}"'" is already installed.'
 			return 0
 		fi
 	else
 		return 1
+	fi
+}
+
+function _freqtrade_setup {
+	_kill
+	
+	sudo chmod +x "${path}/setup.sh"
+	
+	echo '# Installing "'"${path_name}"'" may take some time, please be patient...'
+	cd "${path}"
+	yes $'no' | sudo ./setup.sh -i >/dev/null 2>&1
+		
+	echo '# Installing "pandas-ta" may take some time, please be patient...'
+	cd "${path}"
+	_env_deactivate
+	python3 -m venv .env >/dev/null 2>&1
+	source .env/bin/activate
+	python3 -m pip install --upgrade pip >/dev/null 2>&1
+	python3 -m pip install -e . >/dev/null 2>&1
+	pip install pandas-ta >/dev/null 2>&1
+	_env_deactivate
+	
+	# get that precious sqlite databases into the newest install
+	if [[ ! -z $(find "${path_latest}" -type f | grep 'sqlite$') ]]; then
+		echo '# Copy sqlite databases from "'"${path_latest}"'" to "'"${path}"'" now:'
+
+		for sqlite_path in $(find "${path_latest}" -type f | grep 'sqlite$'); do
+
+			# copy files with -a so they keep their metadata
+			cp -a "${sqlite_path}" "${path}"
+			
+			local sqlite_file=$(basename "${sqlite_path}")
+			
+			# check if copy actually exists and exit if there is a problem
+			if [[ -f "${path}/${sqlite_file}" ]]; then
+				echo '- "'"${sqlite_file}"'" copied...'
+			else				
+				sudo rm -rf "${path}"
+				echo '# ERROR: Can not popy sqlite databases. Retry again!'
+				exit 1
+			fi
+		done
+	else
+		echo '# No sqlite databases in "'"${path_latest}"'" found.'
+	fi
+			
+	_freqtrade_installed
+	if [[ "$?" -eq 1 ]]; then				
+		sudo rm -rf "${path}"
+		echo '# ERROR: "'"${path_name}"'" not installed. Retry again!'
+		exit 1
+	else
+		echo '# "'"${path_name}"'" install successfully finished.'		
+		return 0
 	fi
 }
 
@@ -362,11 +411,11 @@ function _proxy_json {
 			echo '# ERROR: Can not create "'"${path_name}"'" config.'
 			exit 1
 		else
-			echo '# INFO: "'"${path_name}"'" config created.'
+			echo '# "'"${path_name}"'" config created.'
 			return 0
 		fi
 	else
-		# less verbose; echo '# INFO: "'"${path_name}"'" config found.'
+		# less verbose; echo '# "'"${path_name}"'" config found.'
 		return 0
 	fi
 }
@@ -382,11 +431,11 @@ function _proxy_tmux {
 			echo '# ERROR: Can not start "'"${path_name}"'" tmux session.'
 			return 1
 		else
-			echo '# INFO: New "'"${path_name}"'" tmux session startet.'
+			echo '# New "'"${path_name}"'" tmux session startet.'
 			return 0
 		fi
 	else
-		# less verbose; echo '# INFO: "'"${path_name}"'" tmux session is running.'
+		# less verbose; echo '# "'"${path_name}"'" tmux session is running.'
 		return 0
 	fi
 }
@@ -396,7 +445,7 @@ function _proxy {
 	if [ "$?" -eq 0 ] ; then
 
 		if [[ ! -z "${git_latest_version}" ]] && [[ "${git_latest_version}" != "${path_latest_version}" ]]; then
-			echo '# INFO: New "'"${path_name}"'" "'"${path_version}"'" has been downloaded.'
+			echo '# New "'"${path_name}"'" "'"${path_version}"'" has been downloaded.'
 			
 			if [[ ! -x "${path}"'/'"${path_name}" ]]; then
 				sudo chmod +x "${path}"'/'"${path_name}"
@@ -498,7 +547,7 @@ function _autostart {
 		string=''
 		string+='# EXAMPLE:\n'
 		string+='# freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000 -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json -c='"${scriptpath}"'/proxy.json\n'		
-		string+='# INFO: To test new strategies including dryrun, create a sandbox account with API credentials -> https://testnet.binance.vision/'
+		string+='# To test new strategies including dryrun, create a sandbox account with API credentials -> https://testnet.binance.vision/'
 		printf "${string}" > "${autostart}"
 		
 		if [[ ! -f "${autostart}" ]]; then
@@ -584,7 +633,7 @@ function _autostart {
 				_tmux_session "${bot_name}"
 				if [ "$?" -eq 0 ] ; then
 					local count=$((count+1))
-					echo '# INFO: Freqtrade "'"${bot_name}"'" started.'
+					echo '# Freqtrade "'"${bot_name}"'" started.'
 				fi
 			fi
 			
@@ -595,14 +644,14 @@ function _autostart {
 	if [[ "${count}" == 0 ]]; then
 		echo '# WARNING: No freqtrate active bots found. Edit "'"${autostart}"'" file.'
 	else
-		echo '# INFO: There are "'"${count}"'" active freqtrade bots.'
+		echo '# There are "'"${count}"'" active freqtrade bots.'
 	fi
 	echo '-----'
 	_stats
 }
 
 function _kill {
-	tmux kill-session -t "${proxy}"
+	tmux kill-session -t "${proxy}" 2>/dev/null
 	while [[ ! -z $(tmux list-panes -F "#{pane_id}" 2>/dev/null) ]]; do
 		# trying to gracefully stop all bots; https://unix.stackexchange.com/a/568928 
 		tmux list-panes -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c &
@@ -614,7 +663,7 @@ function _kill {
 		tmux kill-server 2>/dev/null
 	fi
 	_service_disable
-	echo "# INFO: All bots stopped and restart service disabled."
+	echo "# All bots stopped and restart service disabled."
 }
 
 function _stats {
