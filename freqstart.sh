@@ -12,6 +12,9 @@ clear
 # ETH 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
 # BSC 0xb155f0F64F613Cd19Fb35d07D43017F595851Af5
 #
+# This software is for educational purposes only. Do not risk money which you are afraid to lose. 
+# USE THE SOFTWARE AT YOUR OWN RISK. THE AUTHORS AND ALL AFFILIATES ASSUME NO RESPONSIBILITY FOR YOUR TRADING RESULTS.
+#
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly service='freqstart.service'
 readonly proxy='binance-proxy'
@@ -319,7 +322,7 @@ function _freqtrade_update {
 				echo '- "'"${sqlite_file}"'" copied...'
 			else				
 				sudo rm -rf "${path}"
-				echo '# ERROR: Can not popy sqlite databases. Retry again!'
+				echo '# ERROR: Can not copy sqlite databases. Retry again!'
 				exit 1
 			fi
 		done
