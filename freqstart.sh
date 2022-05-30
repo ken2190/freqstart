@@ -1,5 +1,6 @@
 #!/bin/bash
 clear
+#
 # https://github.com/berndhofer/freqstart
 #
 # Since this is a small project where I taught myself some bash scripts,
@@ -74,46 +75,12 @@ function _tmp_path {
 	fi
 }
 
-function _git {
-	if [[ "${#}" -eq 0 ]]; then exit 1; fi
-
-	local git="${1}"
-	git_name=$(echo "${git}" | cut -d / -f 6)
-	
-	git_tmp='/tmp/'"${git_name}"'_'"$(_date)"'.json'
-	
-	if [[ ! -f "${git_tmp}" ]]; then
-		curl -o "${git_tmp}" -s -L "${git}"
-	fi
-	git_version=$(cat "${git_tmp}" \
-		| grep -o '"tag_name": ".*"' \
-		| sed 's/"tag_name": "//' \
-		| sed 's/"//')
-
-	local browser_download_url=$(cat "${git_tmp}" \
-		| grep -o -E '"browser_download_url": "(.*)Linux_x86_64.tar.gz"' \
-		| sed 's/"browser_download_url": "//' \
-		| sed 's/"//')
-	local tarball_url=$(cat "${git_tmp}" \
-		| grep -o '"tarball_url": ".*"' \
-		| sed 's/"tarball_url": "//' \
-		| sed 's/"//')
-	
-	# downloading the precompiled linux version as a workaround for binance-proxy
-	if [[ ! -z "${browser_download_url}" ]]; then
-		git_file="${browser_download_url}"
-	else
-		git_file="${tarball_url}"
-	fi
-		
-	git_file_tmp='/tmp/'"${git_name}"'_'$(_hash)
-}
-
 function _apt {
-	if [[ ! -f "${scriptpath}/update.txt" ]]; then
+	local file="${scriptpath}"'/setup-update.txt'
+	if [[ ! -f "${file}" ]]; then
 		string=''
 		string+='Installed unattended-upgrades. Remove file to update server again.'
-		printf "${string}" > "${scriptpath}/update.txt";
+		printf "${string}" > "${file}";
 		
 		sudo apt update && \
 		sudo apt install -y python3-pip python3-venv python3-dev python3-pandas git curl && \
@@ -137,20 +104,9 @@ function _freqtrade {
 	_git "https://api.github.com/repos/freqtrade/freqtrade/releases/latest"
 	
 	if [[ -z "${version}" ]]; then
-		if [[ $(wget -S --spider "${git_file}" 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
-			echo 'INFO: freqtrade download latest version "'"${git_version}"'".'
-
-			mkdir -p "${git_file_tmp}"
-			wget -qO- "${git_file}" \
-				| tar xz -C "${git_file_tmp}"
-			
-			rm -rf "${path}"
-			mkdir -p "${path}"
-
-			cp -R $(_tmp_path "${git_file_tmp}") "${path}"
-
-			rm -rf "${git_file_tmp}"
-
+		
+		_git_download
+		if [ "$?" -eq 0 ] ; then
 			echo 'INFO: freqtrade install may take some time, please be patient...'
 			sudo chmod +x "${path}/setup.sh"
 			cd "${path}"
@@ -168,8 +124,6 @@ function _freqtrade {
 			_env_deactivate
 
 			_freqtrade
-		else
-			echo 'ERROR: freqtrade git repo not reachable.'
 		fi
 	else
 		if [[ ! -z "${git_version}" ]] && [[ "${git_version}" != "${version}" ]]; then
@@ -209,48 +163,43 @@ function _ufw {
 			#sudo ufw allow ssh/tcp > /dev/null
 			#sudo ufw limit ssh/tcp > /dev/null
 			sudo ufw logging medium > /dev/null
-		if [[ -z $(ufw status | grep -qw active) ]]; then
-			sudo ufw enable
-		fi
+			sudo ufw enable > /dev/null
 	fi
 }
 
 function _frequi {
-	if [[ ! -f "${scriptpath}/frequi.txt" ]]; then
-		string=''
-		string+='Frequi decision set. Remove file to install again.'
-		printf "${string}" > "${scriptpath}/frequi.txt";
+	local file="${scriptpath}"'/setup-frequi.txt'
+	local path="${scriptpath}"'/freqtrade'
 
-		local path="${scriptpath}"'/freqtrade'
+	if [[ ! -f "${file}" ]]; then
+		string=''
+		string+='FreqUI decision set. Remove file to install again.'
+		printf "${string}" > "${file}";
 
 		while true; do
-			read -p 'Do you want to use FreqUI (Web Frontend)? (y/n) ' _yn
-			case ${_yn} in 
+			echo '-'
+			read -p 'Do you want to use FreqUI? (y/n) ' yn
+			case "${yn}" in
 				[yY])
 					_kill
 					_ufw
 					_nginx
 					
 					while true; do
-						read -p 'Do you want a secure the connection to the "frequi" api server? (y/n) ' yn
-						case "${yn}" in 
-							[yY])
-								while true; do
-									read -p 'Do you want to use LetsEncrypt for SSL? Domain required! (y/n) ' yn
-									case "${yn}" in 
-										[yY])
-											_letsencrypt
-											break;;
-										[nN])
-											_openssl
-											break;;
-										*)
-											_invalid
-											;;
-									esac
-								done
+						echo '-'
+						echo 'Do you want a secure connection to "FreqUI"?'
+						echo '  1) Yes, I want to use a domain with SSL (truecrypt)'
+						echo '  2) Yes, I want to use an IP with SSL (openssl)'
+						echo '  3) No, I dont want any SSL (not recommended)'
+						read -p 'Enter your choice (1/2/3) ' nr
+						case "${nr}" in 
+							[1])
+								_letsencrypt
 								break;;
-							[nN])
+							[2])
+								_openssl
+								break;;
+							[3])
 								break;;
 							*)
 								_invalid
@@ -276,53 +225,52 @@ function _frequi {
 }
 
 function _openssl {
-		_ssl openssl
+	_ssl openssl
 
-		sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-		-subj "/C=US/ST=Denial/L=Springfield/O=Dis/CN=www.example.com" \
-		-keyout /etc/ssl/private/nginx-selfsigned.key \
-		-out /etc/ssl/certs/nginx-selfsigned.crt
-		sudo openssl dhparam -out /etc/nginx/dhparam.pem 4096
+	sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+	-subj "/C=US/ST=Denial/L=Springfield/O=Dis/CN=www.example.com" \
+	-keyout /etc/ssl/private/nginx-selfsigned.key \
+	-out /etc/ssl/certs/nginx-selfsigned.crt
+	sudo openssl dhparam -out /etc/nginx/dhparam.pem 4096
 
-		string=''
-		string=$(cat <<-END
-		ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
-		ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
-		END
-		)
-		printf "${string}" > '/etc/nginx/snippets/self-signed.conf'
-		
-		string=''
-		string=$(cat <<-END
-		ssl_protocols TLSv1.2;
-		ssl_prefer_server_ciphers on;
-		ssl_dhparam /etc/nginx/dhparam.pem;
-		ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
-		ssl_ecdh_curve secp384r1; # Requires nginx >= 1.1.0
-		ssl_session_timeout  10m;
-		ssl_session_cache shared:SSL:10m;
-		ssl_session_tickets off; # Requires nginx >= 1.5.9
-		ssl_stapling on; # Requires nginx >= 1.3.7
-		ssl_stapling_verify on; # Requires nginx => 1.3.7
-		resolver 8.8.8.8 8.8.4.4 valid=300s;
-		resolver_timeout 5s;
-		# Disable strict transport security for now. You can uncomment the following
-		# line if you understand the implications.
-		# add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload";
-		add_header X-Frame-Options DENY;
-		add_header X-Content-Type-Options nosniff;
-		add_header X-XSS-Protection "1; mode=block";
-		END
-		)
-		printf "${string}" > '/etc/nginx/snippets/ssl-params.conf'
-		
+	string=''
+	string=$(cat <<-END
+	ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
+	ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
+	END
+	)
+	printf "${string}" > '/etc/nginx/snippets/self-signed.conf'
+	
+	string=''
+	string=$(cat <<-END
+	ssl_protocols TLSv1.2;
+	ssl_prefer_server_ciphers on;
+	ssl_dhparam /etc/nginx/dhparam.pem;
+	ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+	ssl_ecdh_curve secp384r1; # Requires nginx >= 1.1.0
+	ssl_session_timeout  10m;
+	ssl_session_cache shared:SSL:10m;
+	ssl_session_tickets off; # Requires nginx >= 1.5.9
+	ssl_stapling on; # Requires nginx >= 1.3.7
+	ssl_stapling_verify on; # Requires nginx => 1.3.7
+	resolver 8.8.8.8 8.8.4.4 valid=300s;
+	resolver_timeout 5s;
+	# Disable strict transport security for now. You can uncomment the following
+	# line if you understand the implications.
+	# add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload";
+	add_header X-Frame-Options DENY;
+	add_header X-Content-Type-Options nosniff;
+	add_header X-XSS-Protection "1; mode=block";
+	END
+	)
+	printf "${string}" > '/etc/nginx/snippets/ssl-params.conf'
 }
 
 function _letsencrypt {
 	while true; do
 		read -p 'Enter your domain (www.example.com): ' domain
 		if [[ "${domain}" != '' ]]; then
-			read -p 'Is the domain "'"${domain}"'" correct? (y/n) ' yn
+			read -p 'Is the domain "'"${domain}"'" correct and are the DNS records set? (y/n) ' yn
 		else
 			yn='empty'
 		fi
@@ -340,7 +288,7 @@ function _letsencrypt {
 				echo "one more chance..."
 				;;
 			'empty')
-				echo "domain can not be empty!"
+				echo "ERROR: The domain can not be empty!"
 				;;
 			*)
 				_invalid
@@ -350,8 +298,8 @@ function _letsencrypt {
 }
 
 function _nginx {
-	sudo apt-get update -y 
-	sudo apt-get install -y nginx
+	sudo apt-get update -y > /dev/null
+	sudo apt-get install -y nginx > /dev/null
 
 	local path='/etc/nginx/conf.d'
 	local freqstart_conf="${path}"'/freqstart.conf'
@@ -381,7 +329,7 @@ function _nginx {
 	sudo systemctl start nginx
 	#sudo systemctl restart nginx
 	
-	_api_json
+	_frequi_json
 }
 
 function _ssl {
@@ -461,12 +409,12 @@ function _ssl {
 	sudo systemctl start nginx
 	#sudo systemctl restart nginx
 	
-	_api_json "${domain}"
+	_frequi_json "${domain}"
 }
 
-function _api_json {
+function _frequi_json {
 	local domain="${1}"
-	local file="${scriptpath}"'/freqstart-api.json'
+	local file="${scriptpath}"'/frequi.json'
 	local jwt_secret_key=$(_passwd)
 	local username=$(_passwd)
 	local password=$(_passwd)
@@ -505,23 +453,106 @@ function _api_json {
 	fi
 }
 
+function _git {
+	if [[ "${#}" -eq 0 ]]; then exit 1; fi
+
+	local git="${1}"
+
+	if [[ ! -z "$(echo "${git}" | grep -o '.*/archive/.*')" ]]; then
+		git_name=$(echo "${git}" | cut -d / -f 5)
+		git_file="${git}"
+		git_version=$(echo "${git}" \
+			| grep -o -E '/(.*).tar.gz' \
+			| sed 's#\.tar\.gz##' \
+			| sed 's#/##')
+		
+		echo "git_version .... ${git_version}"
+	else
+		git_name=$(echo "${git}" | cut -d / -f 6)
+		git_tmp='/tmp/'"${git_name}"'_'"$(_date)"'.json'
+		
+		if [[ ! -f "${git_tmp}" ]]; then
+			curl -o "${git_tmp}" -s -L "${git}"
+		fi
+		git_version=$(cat "${git_tmp}" \
+			| grep -o '"tag_name": ".*"' \
+			| sed 's/"tag_name": "//' \
+			| sed 's/"//')
+
+		local browser_download_url=$(cat "${git_tmp}" \
+			| grep -o -E '"browser_download_url": "(.*)Linux_x86_64.tar.gz"' \
+			| sed 's/"browser_download_url": "//' \
+			| sed 's/"//')
+		local tarball_url=$(cat "${git_tmp}" \
+			| grep -o '"tarball_url": ".*"' \
+			| sed 's/"tarball_url": "//' \
+			| sed 's/"//')
+		
+		# downloading the precompiled linux version as a workaround for binance-proxy
+		if [[ ! -z "${browser_download_url}" ]]; then
+			git_file="${browser_download_url}"
+		else
+			git_file="${tarball_url}"
+		fi
+	fi
+		
+	git_file_tmp='/tmp/'"${git_name}"'_'$(_hash)
+}
+
+function _git_download {
+	local version_file="${path}"'/version.txt'
+	if [[ $(wget -S --spider "${git_file}" 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
+
+		mkdir -p "${git_file_tmp}"
+		wget -qO- "${git_file}" \
+			| tar xz -C "${git_file_tmp}"
+		
+		rm -rf "${path}"
+		mkdir -p "${path}"
+
+		cp -R $(_tmp_path "${git_file_tmp}") "${path}"
+		
+		rm -rf "${git_file_tmp}"
+		
+		string=''
+		string+="${git_version}"
+		printf "${string}" > "${version_file}"
+		
+		if [[ ! -f "${version_file}" ]]; then
+			echo 'ERROR: '$(basename "${version_file}")' does not exist.'
+			exit 1
+		fi
+		
+		if [ ! -z "$(ls -A ${path})" ]; then
+			echo 'INFO: '"${git_name}"' version "'"${git_version}"'" downloaded.'
+			return 0
+		else
+			echo 'ERROR: '"${git_name}"' version "'"${git_version}"'" download failed.'
+			rm -rf "${path}"
+			exit 1
+		fi
+	else
+		return 1
+	fi
+}
 function _strategy {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
 	if [[ "${unattended}" == 'true' ]]; then return 0; fi
 	
-	local strategy=$(echo "${1}" | grep -e '--strategy-path=.*' | sed 's#--strategy-path=##')
+	local path=$(echo "${1}" | grep -e '--strategy-path=.*' | sed 's#--strategy-path=##')
+	local version=$(basename "${strategy}" | grep -o '_.*' | sed 's#_##')
+
 	if [[ ! -z "${strategy}" ]]; then
 		if [[ "${strategy}" == *"${nfi}"* ]]; then
-			local version=$(basename "${strategy}" | grep -o '_.*' | sed 's#_##')
-			
 			if [[ ! -z "${version}" ]]; then
 				if [[ ! -d "${strategy}" ]]; then
-					return 1
+					_git "https://github.com/iterativv/NostalgiaForInfinity/archive/refs/tags/${version}.tar.gz"
+
+					_git_download
 				else
 					return 0
 				fi
 			else
-				local version_file="${strategy}"'/freqstart-version.txt'
 				if [[ -f "${version_file}" ]]; then
 					local version="$(< "${version_file}")"
 				fi
@@ -534,36 +565,7 @@ function _strategy {
 						read -p 'Do you want to install "'"${git_name}"'" version "'"${git_version}"'"? (y/n) ' yn
 						case "${yn}" in 
 							[yY])
-								if [[ $(wget -S --spider "${git_file}" 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
-									mkdir -p "${git_file_tmp}"
-									wget -qO- "${git_file}" \
-										| tar xz -C "${git_file_tmp}"
-									
-									rm -rf "${strategy}"
-									mkdir -p "${strategy}"
-
-									cp -R $(_tmp_path "${git_file_tmp}") "${strategy}"
-									
-									rm -rf "${git_file_tmp}"
-									
-									string=''
-									string+="${git_version}"
-									printf "${string}" > "${version_file}"
-									
-									if [[ ! -f "${version_file}" ]]; then
-										echo 'ERROR: '$(basename "${version_file}")' does not exist.'
-										exit 1
-									fi
-									
-									if [ ! -z "$(ls -A ${strategy})" ]; then
-										echo 'INFO: '"${git_name}"' latest version "'"${git_version}"'" installed.'
-										return 0
-									else
-										return 1
-									fi
-								else
-									return 1
-								fi
+								_git_download
 
 								break;;
 							[nN])		
@@ -583,6 +585,8 @@ function _strategy {
 		fi
 	fi
 }
+
+
 
 function _config {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
@@ -690,7 +694,7 @@ function _proxy_tmux {
 			echo 'INFO: "'"${proxy}"'" version "'"${version}"'" tmux session startet.'
 		fi
 	else
-		echo 'INFO: "'"${proxy}"'" version "'"${version}"'" tmux session is running.'
+		echo 'INFO: "'"${proxy}"'" version "'"${version}"'" tmux session is active.'
 	fi
 }
 
@@ -801,7 +805,6 @@ function _service {
 }
 
 function _ntp {
-	# do not run any bots on unsynced servers
 	local timentp=$(timedatectl | grep -q 'NTP service: active')
 	local timeutc=$(timedatectl | grep -q 'Time zone: UTC (UTC, +0000)')
 	local timesyn=$(timedatectl | grep -q 'System clock synchronized: yes')
@@ -816,6 +819,7 @@ function _ntp {
 	fi
 	if [[ ! -z "${timentp}" ]] || [[ ! -z  "${timeutc}" ]] || [[ ! -z  "${timesyn}" ]]; then
 		echo "# ERROR: NTP not active or not synchronized."
+		exit 1
 	fi
 }
 
@@ -827,10 +831,12 @@ function _autostart {
 
 	if [[ ! -f "${autostart}" ]]; then
 		string=''
-		string+='# NFI example with version incl. proxy:\n'
-		string+='# freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000 -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json -c='"${scriptpath}"'/freqstart-proxy.json\n'
-		string+='# NFI example for latest version incl. proxy and frequi:\n'
+		string+='# NFI example with version:\n'
+		string+='# freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000 -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json\n'
+		string+='\n'
+		string+='# NFI example for latest version incl. proxy and frequi-api:\n'
 		string+='# freqtrade trade --dry-run --db-url sqlite:///example-latest-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path='"${scriptpath}"'/NostalgiaForInfinity -c='"${scriptpath}"'/NostalgiaForInfinity/configs/pairlist-volume-binance-usdt.json -c='"${scriptpath}"'/NostalgiaForInfinity/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity/configs/exampleconfig.json -c='"${scriptpath}"'/freqstart-proxy.json -c='"${scriptpath}"'/freqstart-api.json\n'
+		string+='\n'
 		string+='# To test new strategies on binbance including dryrun, create a sandbox account with API credentials -> https://testnet.binance.vision/'
 		printf "${string}" > "${autostart}"
 		
@@ -929,10 +935,9 @@ function _autostart {
 				else
 					echo '-'
 					echo 'ERROR: Starting bot "'"${bot_name}"'" in debug mode.'
-					echo '-'
-					echo '1) Enter command: tmux a -t '"${bot_name}"
-					echo '2) Look for missing parameters or potential proxy errors.'
-					echo '3) Review your "'$(basename "${autostart}")'" file.'
+					echo '  1) Enter command: tmux a -t '"${bot_name}"
+					echo '  2) Look for errors and missing parameters in config files.'
+					echo '  3) Review your "'$(basename "${autostart}")'" file.'
 					/usr/bin/tmux new -s "${bot_name}" -d
 					/usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" C-m
 					/usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" C-m	
@@ -944,7 +949,6 @@ function _autostart {
 	done
 	_autostart_stats
 }
-
 
 function _kill {
 	echo '# WARNING: Starting the purge, please be patient...'
@@ -983,7 +987,7 @@ function _autostart_stats {
 function _help {
 	string=''
 	string+='-----\n'
-	string+='FREQSTART: Freqstart simplifies the usage of freqtrade with NostalgiaForInfinity strategies.\n'
+	string+='FREQSTART: Simplifies the usage of freqtrade with NostalgiaForInfinity strategies.\n'
 	string+='-\n'
 	string+='Type "tmux a" to attach to latest TMUX session.\n'
 	string+='Use "ctrl+b s" to switch between TMUX sessions.\n'
@@ -1002,7 +1006,7 @@ function _start {
 	_ntp
 	_freqtrade
 	_frequi
-	#_service
+	_service
 	_autostart
 }
 
