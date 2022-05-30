@@ -17,9 +17,11 @@ clear
 # USE THE SOFTWARE AT YOUR OWN RISK. THE AUTHORS AND ALL AFFILIATES ASSUME NO RESPONSIBILITY FOR YOUR TRADING RESULTS.
 #
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
-readonly service='freqstart.service'
-readonly proxy='binance-proxy'
-readonly autostart="${scriptpath}"'/autostart.txt'
+readonly freqstart_version='1.0.0'
+readonly freqstart_service='freqstart.service'
+readonly freqstart_autostart="${scriptpath}"'/autostart.txt'
+readonly freqtrade="${scriptpath}"'/freqtrade'
+readonly binance_proxy='binance-proxy'
 readonly nfi='NostalgiaForInfinity'
 readonly server_ip=$(ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1')
 
@@ -104,7 +106,6 @@ function _freqtrade {
 	_git "https://api.github.com/repos/freqtrade/freqtrade/releases/latest"
 	
 	if [[ -z "${version}" ]]; then
-		
 		_git_download
 		if [ "$?" -eq 0 ] ; then
 			echo 'INFO: freqtrade install may take some time, please be patient...'
@@ -132,6 +133,7 @@ function _freqtrade {
 				case "${yn}" in 
 					[yY])
 						echo 'INFO: freqtrade update from version "'"${version}"'" to "'"${git_version}"'". Restart all running bots!'
+						
 						sudo chmod +x "${path}/setup.sh"
 						cd "${path}"
 						_env_deactivate
@@ -157,14 +159,11 @@ function _freqtrade {
 }
 
 function _ufw {
-	if [[ ! -x $(ufw status) ]]; then
-			sudo apt-get update -y > /dev/null
-			sudo apt-get install -y ufw > /dev/null
-			#sudo ufw allow ssh/tcp > /dev/null
-			#sudo ufw limit ssh/tcp > /dev/null
-			sudo ufw logging medium > /dev/null
-			sudo ufw enable > /dev/null
-	fi
+	echo 'INFO: Install "ufw" firewall.'
+	sudo apt-get update -y > /dev/null
+	sudo apt-get install -y ufw > /dev/null
+	sudo ufw logging medium > /dev/null
+	yes $'y' | sudo ufw enable > /dev/null
 }
 
 function _frequi {
@@ -298,6 +297,7 @@ function _letsencrypt {
 }
 
 function _nginx {
+	echo 'INFO: Install "nginx" webserver.'
 	sudo apt-get update -y > /dev/null
 	sudo apt-get install -y nginx > /dev/null
 
@@ -320,23 +320,24 @@ function _nginx {
 	printf "${string}" > "${freqstart_conf}"
 
 	if [ -f "${nginx_conf}" ]; then sudo mv "${nginx_conf}" "${nginx_conf}"'.disabled'; fi
-	
-	sudo rm -f /etc/nginx/sites-enabled/default
-	
-	sudo nginx -s reload
 
+	sudo rm -f /etc/nginx/sites-enabled/default
+
+	_nginx_restart
+	_frequi_json
+}
+
+function _nginx_restart {
 	sudo pkill -f nginx & wait $!
 	sudo systemctl start nginx
-	#sudo systemctl restart nginx
-	
-	_frequi_json
+	sudo nginx -s reload
 }
 
 function _ssl {
 	local path='/etc/nginx/conf.d'
 	local freqstart_conf="${path}"'/freqstart.conf'
 	local nginx_conf="${path}"'/default.conf'
-	
+
 	local mode="${1}"
 	local domain="${2}"
 	if [[ ! -z "${domain}" ]]; then
@@ -344,7 +345,7 @@ function _ssl {
 	else
 		local server_name="${server_ip}"
 	fi
-	
+
 	string=''
 	if [[ "${mode}" == 'openssl' ]]; then
 		string=$(cat <<-END
@@ -403,11 +404,7 @@ function _ssl {
 	
 	sudo rm -f /etc/nginx/sites-enabled/default
 
-	sudo nginx -s reload
-
-	sudo pkill -f nginx & wait $!
-	sudo systemctl start nginx
-	#sudo systemctl restart nginx
+	_nginx_restart
 	
 	_frequi_json "${domain}"
 }
@@ -462,9 +459,9 @@ function _git {
 		git_name=$(echo "${git}" | cut -d / -f 5)
 		git_file="${git}"
 		git_version=$(echo "${git}" \
-			| grep -o -E '/(.*).tar.gz' \
+			| grep -o -E 'tags/(.*)\.tar\.gz' \
 			| sed 's#\.tar\.gz##' \
-			| sed 's#/##')
+			| sed 's#tags\/##')
 		
 		echo "git_version .... ${git_version}"
 	else
@@ -519,15 +516,15 @@ function _git_download {
 		printf "${string}" > "${version_file}"
 		
 		if [[ ! -f "${version_file}" ]]; then
-			echo 'ERROR: '$(basename "${version_file}")' does not exist.'
+			echo 'ERROR: "'$(basename "${version_file}")'" does not exist.'
 			exit 1
 		fi
 		
 		if [ ! -z "$(ls -A ${path})" ]; then
-			echo 'INFO: '"${git_name}"' version "'"${git_version}"'" downloaded.'
+			echo 'INFO: "'"${git_name}"'" version "'"${git_version}"'" downloaded.'
 			return 0
 		else
-			echo 'ERROR: '"${git_name}"' version "'"${git_version}"'" download failed.'
+			echo 'ERROR: "'"${git_name}"'" version "'"${git_version}"'" download failed.'
 			rm -rf "${path}"
 			exit 1
 		fi
@@ -540,12 +537,14 @@ function _strategy {
 	if [[ "${unattended}" == 'true' ]]; then return 0; fi
 	
 	local path=$(echo "${1}" | grep -e '--strategy-path=.*' | sed 's#--strategy-path=##')
-	local version=$(basename "${strategy}" | grep -o '_.*' | sed 's#_##')
 
-	if [[ ! -z "${strategy}" ]]; then
-		if [[ "${strategy}" == *"${nfi}"* ]]; then
+	if [[ ! -z "${path}" ]]; then
+		local version=$(basename "${path}" | grep -o '_.*' | sed 's#_##')
+		local version_file="${path}"'/version.txt'
+
+		if [[ "${path}" == *"${nfi}"* ]]; then
 			if [[ ! -z "${version}" ]]; then
-				if [[ ! -d "${strategy}" ]]; then
+				if [[ ! -d "${path}" ]]; then
 					_git "https://github.com/iterativv/NostalgiaForInfinity/archive/refs/tags/${version}.tar.gz"
 
 					_git_download
@@ -562,11 +561,11 @@ function _strategy {
 				if [[ ! -z "${git_version}" ]] && [[ "${git_version}" != "${version}" ]]; then
 					while true; do
 						echo '-'
-						read -p 'Do you want to install "'"${git_name}"'" version "'"${git_version}"'"? (y/n) ' yn
+						read -p 'Download "'"${git_name}"'" version "'"${git_version}"'"? (y/n) ' yn
 						case "${yn}" in 
 							[yY])
 								_git_download
-
+								
 								break;;
 							[nN])		
 								break;;
@@ -577,16 +576,14 @@ function _strategy {
 					done
 				fi
 			fi
-		elif [[ ! -d "${strategy}" ]]; then
-			echo 'ERROR: Automated download for "'$(basename "${strategy}")'" is not implemented.'
+		elif [[ ! -d "${path}" ]]; then
+			echo 'ERROR: Automated download for "'$(basename "${path}")'" is not implemented.'
 			return 1
 		else
 			return 0
 		fi
 	fi
 }
-
-
 
 function _config {
 	if [[ "${#}" -eq 0 ]]; then exit 1; fi
@@ -644,7 +641,7 @@ function _tmux_kill {
 }
 
 function _proxy_json {
-	local path="${scriptpath}"'/'"${proxy}"'.json'
+	local path="${scriptpath}"'/'"${binance_proxy}"'.json'
 
 	if [[ ! -f "${path}" ]]; then
 		string=$(cat <<-END
@@ -669,39 +666,39 @@ function _proxy_json {
 		printf "${string}" > "${path}"
 		
 		if [[ ! -f "${path}" ]]; then
-			echo 'ERROR: Can not create "'"${proxy}"'.json" file.'
+			echo 'ERROR: Can not create "'"${binance_proxy}"'.json" file.'
 			exit 1
 		else
-			echo 'INFO: "'"${proxy}"'.json" file created.'
+			echo 'INFO: "'"${binance_proxy}"'.json" file created.'
 		fi
 	fi
 }
 
 function _proxy_tmux {
-	local path="${scriptpath}"'/'"${proxy}"
+	local path="${scriptpath}"'/'"${binance_proxy}"
 	local path_latest=$(ls -d "${path}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
 	local version=$(basename "${path_latest}" | grep -o '_.*' | sed 's#_##')
 	
-	_tmux_session "${proxy}"
+	_tmux_session "${binance_proxy}"
 	if [[ "$?" -eq 1 ]]; then
-		/usr/bin/tmux new -s "${proxy}" -d
-		/usr/bin/tmux send-keys -t "${proxy}" "${path_latest}"'/'"${proxy}" -v Enter
+		/usr/bin/tmux new -s "${binance_proxy}" -d
+		/usr/bin/tmux send-keys -t "${binance_proxy}" "${path_latest}"'/'"${binance_proxy}" -v Enter
 		
-		_tmux_session "${proxy}"
+		_tmux_session "${binance_proxy}"
 		if [[ "$?" -eq 1 ]]; then
-			echo 'ERROR: Can not start "'"${proxy}"'" tmux session.'
+			echo 'ERROR: Can not start "'"${binance_proxy}"'" tmux session.'
 		else
-			echo 'INFO: "'"${proxy}"'" version "'"${version}"'" tmux session startet.'
+			echo 'INFO: "'"${binance_proxy}"'" version "'"${version}"'" tmux session startet.'
 		fi
 	else
-		echo 'INFO: "'"${proxy}"'" version "'"${version}"'" tmux session is active.'
+		echo 'INFO: "'"${binance_proxy}"'" version "'"${version}"'" tmux session is active.'
 	fi
 }
 
 function _proxy {
 	_proxy_json
 	
-	local path="${scriptpath}"'/'"${proxy}"
+	local path="${scriptpath}"'/'"${binance_proxy}"
 	local path_latest=$(ls -d "${path}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -1)
 	#local path_previous=$(ls -d "${path}"_* 2>/dev/null | sort -nr -t _ -k 2 | head -2 | tail -1)
 	local version=$(basename "${path_latest}" | grep -o '_.*' | sed 's#_##')
@@ -714,7 +711,7 @@ function _proxy {
 			case "${yn}" in 
 				[yY])
 					if [[ $(wget -S --spider "${git_file}" 2>&1 | grep 'HTTP/1.1 200 OK') ]]; then
-						echo 'INFO: '"${proxy}"' download latest version "'"${git_version}"'".'
+						echo 'INFO: '"${binance_proxy}"' download latest version "'"${git_version}"'".'
 
 						mkdir -p "${git_file_tmp}"
 						wget -qO- "${git_file}" \
@@ -726,12 +723,12 @@ function _proxy {
 
 						rm -rf "${git_file_tmp}"
 						
-						sudo chmod +x "${path}"'_'"${git_version}"'/'"${proxy}"
+						sudo chmod +x "${path}"'_'"${git_version}"'/'"${binance_proxy}"
 						
-						_tmux_session "${proxy}"
+						_tmux_session "${binance_proxy}"
 						if [ "$?" -eq 0 ] ; then
-							echo '# WARNING: Restart "'"${proxy}"'" tmux session. Review all running bots!'
-							tmux kill-session -t "${proxy}"
+							echo '# WARNING: Restart "'"${binance_proxy}"'" tmux session. Review all running bots!'
+							tmux kill-session -t "${binance_proxy}"
 						fi
 					fi
 
@@ -749,36 +746,36 @@ function _proxy {
 }
 
 function _service_disable {
-	if [[ ! -z "${service}" ]]; then			
-		sudo rm -f "${scriptpath}/${service}"
-		sudo systemctl stop "${service}" &>/dev/null
-		sudo systemctl disable "${service}" &>/dev/null
-		sudo rm -f "/etc/systemd/system/${service}"
+	if [[ ! -z "${freqstart_service}" ]]; then			
+		sudo rm -f "${scriptpath}/${freqstart_service}"
+		sudo systemctl stop "${freqstart_service}" &>/dev/null
+		sudo systemctl disable "${freqstart_service}" &>/dev/null
+		sudo rm -f "/etc/systemd/system/${freqstart_service}"
 		sudo systemctl daemon-reload &>/dev/null
 		sudo systemctl reset-failed &>/dev/null
 	fi
 }
 
 function _service_enable {
-	if [[ ! -z "${service}" ]]; then			
+	if [[ ! -z "${freqstart_service}" ]]; then			
 		sudo systemctl daemon-reload &>/dev/null
 		sudo systemctl reset-failed &>/dev/null
-		sudo systemctl enable "${service}" &>/dev/null
+		sudo systemctl enable "${freqstart_service}" &>/dev/null
 		
-		systemctl is-enabled --quiet "${service}"
+		systemctl is-enabled --quiet "${freqstart_service}"
 		if [[ ! "${?}" -eq 0 ]]; then
-			echo '# ERROR: Service "'"${service}"'" is not enabled.'
+			echo '# ERROR: Service "'"${freqstart_service}"'" is not enabled.'
 			exit 1
 		fi
 	fi
 }
 
 function _service {
-	if [[ ! -z "${service}" ]]; then
+	if [[ ! -z "${freqstart_service}" ]]; then
 		# removing service everytime in case there is a change in the service file
 		_service_disable
 		
-		if [ ! -f "${scriptpath}/${service}" ]; then
+		if [ ! -f "${scriptpath}/${freqstart_service}" ]; then
 			string=$(cat <<-END
 			[Unit]
 			Description=freqstart
@@ -795,9 +792,9 @@ function _service {
 			WantedBy=default.target
 			END
 			)
-			printf "${string}" > "${scriptpath}/${service}"
+			printf "${string}" > "${scriptpath}/${freqstart_service}"
 			
-			sudo systemctl link "${scriptpath}/${service}" &>/dev/null
+			sudo systemctl link "${scriptpath}/${freqstart_service}" &>/dev/null
 		fi	
 
 		_service_enable
@@ -826,27 +823,31 @@ function _ntp {
 function _autostart {
 	_proxy
 
-	local freqtrade="${scriptpath}"'/freqtrade'
 	local count_bots=0
 
-	if [[ ! -f "${autostart}" ]]; then
+	if [[ ! -f "${freqstart_autostart}" ]]; then
 		string=''
-		string+='# NFI example with version:\n'
-		string+='# freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000 -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json\n'
-		string+='\n'
-		string+='# NFI example for latest version incl. proxy and frequi-api:\n'
-		string+='# freqtrade trade --dry-run --db-url sqlite:///example-latest-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path='"${scriptpath}"'/NostalgiaForInfinity -c='"${scriptpath}"'/NostalgiaForInfinity/configs/pairlist-volume-binance-usdt.json -c='"${scriptpath}"'/NostalgiaForInfinity/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity/configs/exampleconfig.json -c='"${scriptpath}"'/freqstart-proxy.json -c='"${scriptpath}"'/freqstart-api.json\n'
-		string+='\n'
-		string+='# To test new strategies on binbance including dryrun, create a sandbox account with API credentials -> https://testnet.binance.vision/'
-		printf "${string}" > "${autostart}"
+		string=$(cat <<-END
+		NFI example with version:
+		# freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000 -c=${scriptpath}/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c=${scriptpath}/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c=${scriptpath}/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json
+
+		NFI example for latest version incl. proxy and frequi-api:
+		# freqtrade trade --dry-run --db-url sqlite:///example-latest-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path=${scriptpath}/NostalgiaForInfinity -c='"${scriptpath}"'/NostalgiaForInfinity/configs/pairlist-volume-binance-usdt.json -c=${scriptpath}/NostalgiaForInfinity/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity/configs/exampleconfig.json -c=${scriptpath}/binance-proxy.json -c='"${scriptpath}"'/frequi.json
+
+		To test new strategies on binbance including dryrun,
+		create a sandbox account with API credentials:
+		https://testnet.binance.vision/
+		END
+		)
+		printf "${string}" > "${freqstart_autostart}"
 		
-		if [[ ! -f "${autostart}" ]]; then
-			echo '# ERROR: '"${autostart}"' does not exist.'
+		if [[ ! -f "${freqstart_autostart}" ]]; then
+			echo '# ERROR: '"${freqstart_autostart}"' does not exist.'
 			exit 1
 		fi
 	fi
 	
-	readarray -t bots < "${autostart}"
+	readarray -t bots < "${freqstart_autostart}"
 	
 	echo '-----'
 	
@@ -937,7 +938,7 @@ function _autostart {
 					echo 'ERROR: Starting bot "'"${bot_name}"'" in debug mode.'
 					echo '  1) Enter command: tmux a -t '"${bot_name}"
 					echo '  2) Look for errors and missing parameters in config files.'
-					echo '  3) Review your "'$(basename "${autostart}")'" file.'
+					echo '  3) Review your "'$(basename "${freqstart_autostart}")'" file.'
 					/usr/bin/tmux new -s "${bot_name}" -d
 					/usr/bin/tmux send-keys -t "${bot_name}" "cd ${freqtrade}" C-m
 					/usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" C-m	
@@ -951,9 +952,9 @@ function _autostart {
 }
 
 function _kill {
-	echo '# WARNING: Starting the purge, please be patient...'
+	echo 'WARNING: Starting the purge, please be patient...'
 	#kill all sessions gracefully
-	tmux kill-session -t "${proxy}" 2>/dev/null
+	tmux kill-session -t "${binance_proxy}" 2>/dev/null
 	while [[ ! -z $(tmux ls -F "#{session_name}" 2>/dev/null) ]]; do
 		tmux ls -F "#{session_name}" | xargs -I {} tmux send-keys -t {} C-c 2>/dev/null
 		sleep 0.1
@@ -964,7 +965,7 @@ function _kill {
 	tmux kill-server 2>/dev/null
 
 	_service_disable
-	echo "# WARNING: All bots stopped and restart service is disabled."
+	echo "WARNING: All bots stopped and restart service is disabled."
 }
 
 function _autostart_stats {
@@ -1001,6 +1002,8 @@ function _help {
 }
 
 function _start {
+	echo 'FREQSTART: '"${freqstart_version}"
+	echo '-----'
 	_apt
 	_tmux
 	_ntp
