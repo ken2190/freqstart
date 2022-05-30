@@ -216,7 +216,7 @@ function _ufw {
 }
 
 function _frequi {
-	if [[ -f "${scriptpath}/frequi.txt" ]]; then
+	if [[ ! -f "${scriptpath}/frequi.txt" ]]; then
 		string=''
 		string+='Frequi decision set. Remove file to install again.'
 		printf "${string}" > "${scriptpath}/frequi.txt";
