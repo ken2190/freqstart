@@ -1,3 +1,6 @@
 
 *.json
 *.txt
+*.py
+*.sqlite
+*.pyc
