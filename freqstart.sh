@@ -1,5 +1,6 @@
 #!/bin/bash
 clear
+readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 #
 # https://github.com/berndhofer/freqstart
 #
@@ -16,14 +17,28 @@ clear
 # This software is for educational purposes only. Do not risk money which you are afraid to lose. 
 # USE THE SOFTWARE AT YOUR OWN RISK. THE AUTHORS AND ALL AFFILIATES ASSUME NO RESPONSIBILITY FOR YOUR TRADING RESULTS.
 #
-readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
 readonly freqstart_version='v1.1.0'
 readonly freqstart_service='freqstart.service'
 readonly freqstart_autostart="${scriptpath}"'/autostart.txt'
+readonly freqstart_protect='live.*|protect.*'
+readonly freqstart_configs="${scriptpath}"'/configs'
+if [[ -d "${freqstart_configs}" ]]; then mkdir -p "${freqstart_configs}"; fi
+readonly freqstart_setup="${scriptpath}"'/setup'
+if [[ -d "${freqstart_setup}" ]]; then mkdir -p "${freqstart_setup}"; fi
+readonly freqstart_setup_update="${freqstart_setup}"'/update.txt'
+readonly freqstart_setup_frequi="${freqstart_setup}"'/frequi.txt'
 readonly freqtrade="${scriptpath}"'/freqtrade'
+readonly frequi_strategy="${freqstart_setup}"'/DoesNothingStrategy.py'
+readonly frequi_strategy_git="https://raw.githubusercontent.com/freqtrade/freqtrade-strategies/master/user_data/strategies/berlinguyinca/DoesNothingStrategy.py"
 readonly binance_proxy='binance-proxy'
 readonly nfi='NostalgiaForInfinity'
 readonly server_ip=$(ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1')
+
+function _intro {
+	echo '-----'
+	echo 'FREQSTART: '"${freqstart_version}"
+	echo '-----'
+}
 
 function _hash {
 	echo $(cat /dev/urandom \
@@ -55,6 +70,10 @@ function _passwd {
 	echo $(sudo < /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c${1:-16})
 }
 
+function _secret {
+	echo $(sudo < /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c${1:-32})
+}
+
 function _env_deactivate {
 	if [ -n "${VIRTUAL_ENV}" ]; then
 		deactivate
@@ -77,22 +96,49 @@ function _tmp_path {
 	fi
 }
 
+function _ufw {
+	echo 'INFO: Installing "ufw" firewall.'
+	sudo apt-get update -y > /dev/null
+	sudo apt-get install -y ufw > /dev/null
+	sudo ufw logging medium > /dev/null
+	sudo ufw allow 'Nginx Full' > /dev/null
+	yes $'y' | sudo ufw enable > /dev/null
+}
+
 function _apt {
-	local file="${scriptpath}"'/setup-update.txt'
-	if [[ ! -f "${file}" ]]; then
-		string=''
-		string+='Installed unattended-upgrades. Remove file to update server again.'
-		printf "${string}" > "${file}";
-		
-		sudo apt update && \
-		sudo apt install -y python3-pip python3-venv python3-dev python3-pandas git curl && \
-		sudo apt -o Dpkg::Options::="--force-confdef" dist-upgrade -y && \
-		sudo apt install -y unattended-upgrades && \
-		sudo apt autoremove -y && \
-		if sudo test -f /var/run/reboot-required; \
-		then read -p "A reboot is required to finish installing updates. Press [ENTER] to reboot now, or [CTRL+C] to cancel and reboot later." && \
-		sudo reboot; \
-		else echo "A reboot is not required. Exiting..."; fi
+	if [[ ! -f "${freqstart_setup_update}" ]]; then
+		while true; do
+			read -p 'Do you want to update server and install prerequisites now? Reboot may be required! (y/n) ' yn
+			case "${yn}" in 
+				[yY])
+					
+					sudo apt update && \
+					sudo apt install -y python3-pip python3-venv python3-dev python3-pandas git curl && \
+					sudo apt -o Dpkg::Options::="--force-confdef" dist-upgrade -y && \
+					sudo apt install -y unattended-upgrades && \
+					sudo apt autoremove -y
+					
+					string=''
+					string+='installed'
+					
+					if sudo test -f /var/run/reboot-required; then
+						read -p 'A reboot is required to finish installing updates. Press [ENTER] to reboot now, or [CTRL+C] to cancel and reboot later.' && \
+						printf "${string}" > "${freqstart_setup_update}" && \
+						sudo reboot;
+					else
+						printf "${string}" > "${freqstart_setup_update}";
+						echo "A reboot is not required. Exiting..."
+					fi
+
+					break;;
+				[nN])
+					echo 'WARNING: Installation canceled. Restart "'$(basename "${scriptname}")'" to continue the installation.'
+					exit 1;;
+				*)
+					_invalid
+					;;
+			esac
+		done
 	fi
 }
 
@@ -159,119 +205,62 @@ function _freqtrade {
 }
 
 function _frequi_tmux {
-	_frequi_strategy
-	
-	local session='frequi-server'
-	local strategy_path="${freqtrade}"'/user_data/strategies'
-
-	_tmux_session "${session}"
-	if [[ "$?" -eq 1 ]]; then
-		echo 'INFO: Starting bot "'"${session}"'".'
-
-		/usr/bin/tmux new -s "${session}" -d
-		/usr/bin/tmux send-keys -t "${session}" "cd ${freqtrade}" C-m
-		/usr/bin/tmux send-keys -t "${session}" ". .env/bin/activate" C-m	
-		/usr/bin/tmux send-keys -t "${session}" "exec freqtrade trade --db-url sqlite:///${session}.sqlite --strategy=DoesNothingStrategy -c=${scriptpath}/frequi-server.json" C-m
+	if [[ ! -z $(echo | cat "${freqstart_setup_frequi}" | grep 'installed') ]]; then
+		_frequi_strategy
 		
-		_cdown 10 'for any errors...'
-	
+		local session='frequi-server'
+
 		_tmux_session "${session}"
 		if [[ "$?" -eq 1 ]]; then
-			echo '-'
-			echo 'ERROR: Starting bot "'"${session}"'" in debug mode.'
-			echo '  1) Enter command: tmux a -t '"${session}"
-			echo '  2) Look for errors and missing parameters in config files.'
+			echo 'INFO: Starting "'"${session}"'".'
+
 			/usr/bin/tmux new -s "${session}" -d
 			/usr/bin/tmux send-keys -t "${session}" "cd ${freqtrade}" C-m
 			/usr/bin/tmux send-keys -t "${session}" ". .env/bin/activate" C-m	
-			/usr/bin/tmux send-keys -t "${session}" "freqtrade trade --db-url sqlite:///${session}.sqlite --strategy=DoesNothingStrategy -c=${scriptpath}/frequi-server.json" C-m
+			/usr/bin/tmux send-keys -t "${session}" "exec freqtrade trade --db-url sqlite:///${session}.sqlite --strategy=DoesNothingStrategy --strategy-path=${freqstart_setup} -c=${freqstart_configs}/frequi-server.json" C-m
+			
+			_cdown 10 'for any errors...'
+		
+			_tmux_session "${session}"
+			if [[ "$?" -eq 1 ]]; then
+				echo '-'
+				echo 'ERROR: Starting "'"${session}"'" in debug mode.'
+				echo '  1) Enter command: tmux a -t '"${session}"
+				echo '  2) Look for errors and missing parameters in config files.'
+				/usr/bin/tmux new -s "${session}" -d
+				/usr/bin/tmux send-keys -t "${session}" "cd ${freqtrade}" C-m
+				/usr/bin/tmux send-keys -t "${session}" ". .env/bin/activate" C-m	
+				/usr/bin/tmux send-keys -t "${session}" "freqtrade trade --db-url sqlite:///${session}.sqlite --strategy=DoesNothingStrategy --strategy-path=${freqstart_setup} -c=${freqstart_configs}/frequi-server.json" C-m
+			else
+				echo 'INFO: Bot "'"${session}"'" active.'
+			fi
 		else
 			echo 'INFO: Bot "'"${session}"'" active.'
 		fi
-	else
-		echo 'INFO: Bot "'"${session}"'" active.'
 	fi
 }
 
 function _frequi_strategy {
-	local file="${freqtrade}"'/user_data/strategies/DoesNothingStrategy.py'
-
-	if [[ ! -f "${file}" ]]; then
-		string=''
-		string=$(cat <<-END
-		# --- Do not remove these libs ---
-		from freqtrade.strategy.interface import IStrategy
-		from pandas import DataFrame
-		# --------------------------------
-
-
-		class DoesNothingStrategy(IStrategy):
-		"""
-		just a skeleton
-		"""
-
-		# Minimal ROI designed for the strategy.
-		# adjust based on market conditions. We would recommend to keep it low for quick turn arounds
-		# This attribute will be overridden if the config file contains "minimal_roi"
-		minimal_roi = {
-		    "0": 0.01
-		}
-
-		# Optimal stoploss designed for the strategy
-		stoploss = -0.25
-
-		# Optimal timeframe for the strategy
-		timeframe = '5m'
-
-		def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-		    return dataframe
-
-		def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-		    dataframe.loc[
-		        (
-		        ),
-		        'buy'] = 1
-		    return dataframe
-
-		def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-		    dataframe.loc[
-		        (
-		        ),
-		        'sell'] = 1
-		    return dataframe
-		END
-		)
-		printf "${string}" > "${file}"
-
-		if [[ ! -f "${file}" ]]; then
-			echo 'ERROR: '$(basename "${file}")' does not exist.'
+	if [[ ! -f "${frequi_strategy}" ]]; then
+		curl -o "${frequi_strategy}" -s -L "${frequi_strategy_git}"
+		
+		if [[ ! -f "${frequi_strategy}" ]]; then
+			echo 'ERROR: Can not download"'$(basename "${frequi_strategy}")'" file.'
 			exit 1
 		fi
 	fi
 }
 
-function _ufw {
-	echo 'INFO: Install "ufw" firewall.'
-	sudo apt-get update -y > /dev/null
-	sudo apt-get install -y ufw > /dev/null
-	sudo ufw logging medium > /dev/null
-	yes $'y' | sudo ufw enable > /dev/null
-}
-
 function _frequi {
-	local file="${scriptpath}"'/setup-frequi.txt'
 	local path="${scriptpath}"'/freqtrade'
 
-	if [[ ! -f "${file}" ]]; then
-		string=''
-		string+='FreqUI decision set. Remove file to install again.'
-		printf "${string}" > "${file}";
-
+	if [[ ! -f "${freqstart_setup_frequi}" ]]; then
 		while true; do
 			echo '-'
 			read -p 'Do you want to use FreqUI? (y/n) ' yn
 			case "${yn}" in
 				[yY])
+
 					_kill
 					_ufw
 					_nginx
@@ -304,8 +293,16 @@ function _frequi {
 					freqtrade install-ui
 					_env_deactivate
 					
+					string=''
+					string+='installed'
+					printf "${string}" > "${freqstart_setup_frequi}";
+					
 					break;;
 				[nN])
+					string=''
+					string+='skipped'
+					printf "${string}" > "${freqstart_setup_frequi}";
+					
 					break;;
 				*)
 					_invalid
@@ -316,7 +313,7 @@ function _frequi {
 }
 
 function _openssl {
-	_ssl openssl
+	_nginx_conf openssl
 
 	sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 	-subj "/C=US/ST=Denial/L=Springfield/O=Dis/CN=www.example.com" \
@@ -370,7 +367,7 @@ function _letsencrypt {
 				sudo apt-get update -y
 				sudo apt-get install -y certbot python3-certbot-nginx
 				
-				_ssl letsencrypt "${domain}"
+				_nginx_conf letsencrypt "${domain}"
 
 				sudo certbot --nginx -d "${domain}"
 				
@@ -400,11 +397,24 @@ function _nginx {
 
 	string=$(cat <<-END
 	server {
-		listen 80;
-		listen [::]:80;
-		server_name ${server_name};
-		location / {
-		    proxy_pass http://localhost:9999/;
+	    listen 80;
+	    listen [::]:80;
+	    server_name ${server_name};
+		
+	    location / {
+	        proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+	        proxy_pass http://127.0.0.1:9999;
+	    }
+	}
+	server {
+	    listen ${server_name}:9000-9100;
+	    server_name ${server_name};
+
+	    location / {
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_pass http://127.0.0.1:\$server_port;
 		}
 	}
 	END
@@ -425,7 +435,7 @@ function _nginx_restart {
 	sudo nginx -s reload
 }
 
-function _ssl {
+function _nginx_conf {
 	local path='/etc/nginx/conf.d'
 	local freqstart_conf="${path}"'/freqstart.conf'
 	local nginx_conf="${path}"'/default.conf'
@@ -442,20 +452,37 @@ function _ssl {
 	if [[ "${mode}" == 'openssl' ]]; then
 		string=$(cat <<-END
 		server {
-		    listen 443 ssl;
-		    listen [::]:443 ssl;
-		    include snippets/self-signed.conf;
-		    include snippets/ssl-params.conf;
-		    server_name ${server_name};
-		    location / {
-		    proxy_pass http://localhost:9999/;
-		    }
-		}
-		server {
 		    listen 80;
 		    listen [::]:80;
 		    server_name ${server_name};
 		    return 301 https://$server_name$request_uri;
+		}
+		server {
+		    listen 443 ssl;
+		    listen [::]:443 ssl;
+		    server_name ${server_name};
+
+		    include snippets/self-signed.conf;
+		    include snippets/ssl-params.conf;
+			
+		    location / {
+		        proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+		        proxy_pass http://127.0.0.1:9999;
+		    }
+		}
+		server {
+		    listen ${server_name}:9000-9100 ssl;
+		    server_name ${server_name};
+			
+		    include snippets/self-signed.conf;
+		    include snippets/ssl-params.conf;
+			
+		    location / {
+		        proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+		        proxy_pass http://127.0.0.1:\$server_port;
+		    }
 		}
 		END
 		)
@@ -466,7 +493,7 @@ function _ssl {
 		    listen 80;
 		    listen [::]:80; 	
 		    server_name ${server_name};
-		    return 301 https://$host$request_uri;
+		    return 301 https://\$host\$request_uri;
 		}
 		server {
 		    listen 443 ssl http2;
@@ -480,11 +507,28 @@ function _ssl {
 			
 		    # Required for LE certificate enrollment using certbot
 		    location '/.well-known/acme-challenge' {
-		    default_type "text/plain";
-		    root /var/www/html;
+		        default_type "text/plain";
+		        root /var/www/html;
 		    }
 		    location / {
-		    proxy_pass http://localhost:9999/;
+		        proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+		        proxy_pass http://127.0.0.1:9999;
+		    }
+		}
+		server {
+		    listen ${server_name}:9000-9100 ssl http2;
+		    server_name ${server_name};
+			
+		    ssl_certificate /etc/letsencrypt/live/${server_name}/fullchain.pem;
+		    ssl_certificate_key /etc/letsencrypt/live/${server_name}/privkey.pem;
+		    include /etc/letsencrypt/options-ssl-nginx.conf;
+		    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+			
+		    location / {
+		        proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+		        proxy_pass http://127.0.0.1:\$server_port;
 		    }
 		}
 		END
@@ -503,12 +547,42 @@ function _ssl {
 
 function _frequi_json {
 	local domain="${1}"
-	local file="${scriptpath}"'/frequi-server.json'
-	local jwt_secret_key=$(_passwd)
+	local file_example="${freqstart_configs}"'/frequi-example.json'
+	local file_server="${freqstart_configs}"'/frequi-server.json'
+
+	local jwt_secret_key=$(_secret)
 	local username=$(_passwd)
 	local password=$(_passwd)
 	
-	if [[ ! -f "${file}" ]]; then
+	if [[ ! -f "${file_example}" ]]; then
+		echo 'INFO: To use "FreqUI" with a bot you have to follow this steps:'
+		echo '  1) Copy the content from "'$(basename "${file_example}")'" to your config.'
+		echo '  2) Change "listen_port" to something between 9000-9100 which is NOT already used.'
+		echo '  3) Login to specific bot by adding :9000 etc. to your IP or domain on the "FreqUI" login mask.'
+		
+		string=''
+		string=$(cat <<-END
+		{
+		    "api_server": {
+		        "enabled": true,
+		        "listen_ip_address": "127.0.0.1",
+		        "listen_port": 9000,
+		        "verbosity": "error",
+		        "enable_openapi": false,
+		        "jwt_secret_key": "${jwt_secret_key}",
+		        "CORS_origins": [],
+		        "username": "${username}",
+		        "password": "${password}"
+		    }
+		}
+		END
+		)
+		printf "${string}" > "${file_example}"
+	else
+		echo 'INFO: "configs/'"$(basename "${file_example}")"'" file already set.'
+	fi
+	if [[ ! -f "${file_server}" ]]; then
+		# have to test whats needed and what not
 		string=''
 		string=$(cat <<-END
 		{
@@ -575,16 +649,18 @@ function _frequi_json {
 		}
 		END
 		)
-		printf "${string}" > "${file}";
-		
-		echo 'INFO: Save your login credentials or edit '"$(basename "${file}")"' file!'
-		echo '-'
-		echo 'USER: '"${username}"
-		echo 'PASSWORD: '"${password}"
-		echo '-'
+		printf "${string}" > "${file_server}"
 	else
-		echo 'INFO: '"$(basename "${file}")"' file already set.'
+		echo 'INFO: "configs/'"$(basename "${file_example}")"'" file already set.'
 	fi
+	
+	echo '-----'
+	echo 'INFO: Save your login credentials or edit "configs/'"$(basename "${file_server}")"'" and "configs/'"$(basename "${file_example}")"'" files!'
+	echo '-'
+	echo 'USER: '"${username}"
+	echo 'PASSWORD: '"${password}"
+	echo '-----'
+	_cdown 5 'to continue...'
 	
 	if [[ ! -z "${domain}" ]]; then
 		sed -i -e 's,"CORS_origins": \[.*\],"CORS_origins": \["https://'"${domain}"'"\],' "${file}"
@@ -782,7 +858,7 @@ function _tmux_kill {
 }
 
 function _proxy_json {
-	local path="${scriptpath}"'/'"${binance_proxy}"'.json'
+	local path="${freqstart_configs}"'/'"${binance_proxy}"'.json'
 
 	if [[ ! -f "${path}" ]]; then
 		string=$(cat <<-END
@@ -905,7 +981,7 @@ function _service_enable {
 		
 		systemctl is-enabled --quiet "${freqstart_service}"
 		if [[ ! "${?}" -eq 0 ]]; then
-			echo '# ERROR: Service "'"${freqstart_service}"'" is not enabled.'
+			echo 'ERROR: Service "'"${freqstart_service}"'" is not enabled.'
 			exit 1
 		fi
 	fi
@@ -914,7 +990,7 @@ function _service_enable {
 function _service {
 	if [[ ! -z "${freqstart_service}" ]]; then
 		# removing service everytime in case there is a change in the service file
-		_service_disable
+		# _service_disable
 		
 		if [ ! -f "${scriptpath}/${freqstart_service}" ]; then
 			string=$(cat <<-END
@@ -956,7 +1032,7 @@ function _ntp {
 		sudo systemctl restart chronyd
 	fi
 	if [[ ! -z "${timentp}" ]] || [[ ! -z  "${timeutc}" ]] || [[ ! -z  "${timesyn}" ]]; then
-		echo "# ERROR: NTP not active or not synchronized."
+		echo 'ERROR: NTP not active or not synchronized.'
 		exit 1
 	fi
 }
@@ -970,11 +1046,11 @@ function _autostart {
 	if [[ ! -f "${freqstart_autostart}" ]]; then
 		string=''
 		string=$(cat <<-END
-		NFI example with version:
+		NFI example with version (change v00.0.000 to desired version):
 		# freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path='"${scriptpath}"'/NostalgiaForInfinity_v00.0.000 -c=${scriptpath}/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c=${scriptpath}/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c=${scriptpath}/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json
 
 		NFI example for latest version incl. proxy and frequi-api:
-		# freqtrade trade --dry-run --db-url sqlite:///example-latest-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path=${scriptpath}/NostalgiaForInfinity -c='"${scriptpath}"'/NostalgiaForInfinity/configs/pairlist-volume-binance-usdt.json -c=${scriptpath}/NostalgiaForInfinity/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity/configs/exampleconfig.json -c=${scriptpath}/binance-proxy.json -c='"${scriptpath}"'/frequi.json
+		# freqtrade trade --dry-run --db-url sqlite:///example-latest-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path=${scriptpath}/NostalgiaForInfinity -c='"${scriptpath}"'/NostalgiaForInfinity/configs/pairlist-volume-binance-usdt.json -c=${scriptpath}/NostalgiaForInfinity/configs/blacklist-binance.json -c='"${scriptpath}"'/NostalgiaForInfinity/configs/exampleconfig.json -c=${freqstart_configs}/binance-proxy.json -c='"${freqstart_configs}"'/frequi-example.json
 
 		To test new strategies on binbance including dryrun,
 		create a sandbox account with API credentials:
@@ -1009,12 +1085,12 @@ function _autostart {
 			for argument in ${arguments[@]}; do
 
 				_config "${argument}"
-				if [ "$?" -eq 1 ] ; then
+				if [[ "$?" -eq 1 ]]; then
 					local error=1
 				fi
 				
 				_strategy "${argument}"
-				if [ "$?" -eq 1 ] ; then
+				if [[ "$?" -eq 1 ]]; then
 					local error=1
 				fi
 			done
@@ -1030,7 +1106,7 @@ function _autostart {
 			fi
 			
 			if [[ -z $(echo "${bot}" | grep -e '--strategy-path=') ]]; then
-				echo "WARNING: --strategy-path is missing."
+				echo 'WARNING: --strategy-path is missing.'
 				#local error=1
 			fi
 			
@@ -1040,8 +1116,12 @@ function _autostart {
 			fi
 
 			_tmux_session "${bot_name}"
-			if [ "$?" -eq 0 ] ; then
-				if [[ "${unattended}" == 'true' ]]; then
+			if [[ "$?" -eq 0 ]]; then
+				if [[ ! -z $(echo "${bot_name}" | grep -E "${freqstart_protect}") ]]; then
+					echo '-'
+					echo 'INFO: Bot "'"${bot_name}"'" is protected and active.'
+					local error=1
+				elif [[ "${unattended}" == 'true' ]]; then
 					_tmux_kill "${bot_name}"
 				else
 					while true; do
@@ -1094,18 +1174,37 @@ function _autostart {
 }
 
 function _kill {
+	echo '-----'
 	echo 'WARNING: Starting the purge, please be patient...'
-	tmux kill-session -t "${binance_proxy}" 2>/dev/null
-	while [[ ! -z $(tmux ls -F "#{session_name}" 2>/dev/null) ]]; do
-		tmux ls -F "#{session_name}" 2>/dev/null | xargs -I {} tmux send-keys -t {} C-c 2>/dev/null
-		sleep 0.1
-		tmux ls -F "#{session_name}" 2>/dev/null | xargs -I {} tmux send-keys -t {} 'exit' C-m 2>/dev/null
+	#tmux kill-session -t "${binance_proxy}" 2>/dev/null
+	echo '-'
+
+	while [[ ! -z $(tmux ls -F "#{session_name}" 2>/dev/null | grep -vE "${freqstart_protect}") ]]; do
+		local session=$(tmux ls -F "#{session_name}" 2>/dev/null | grep -vE "${freqstart_protect}" | head -1)
+		_tmux_kill "${session}"
+		
+		_tmux_session "${session}"
+		if [[ "$?" -eq 1 ]]; then
+			echo 'SUCCESS: "'"${session}"'" tmux session is stopped.'
+		else
+			echo 'ERROR: "'"${session}"'" tmux session could not be stopped.'
+		fi
+		
 		((c++)) && ((c==100)) && break
-		sleep 0.1
 	done
-	tmux kill-server 2>/dev/null
-	_service_disable
-	echo "WARNING: All bots stopped and restart service is disabled."
+	
+	if [[ ! -z $(tmux ls -F "#{session_name}" 2>/dev/null) ]]; then
+		for session_active in $(tmux ls -F "#{session_name}" 2>/dev/null); do
+			echo 'INFO: "'"${session_active[@]}"'" tmux session is protected and active.'
+		done
+		
+		echo '-'
+		echo 'WARNING: Protected tmux sessions and restart service are still active.'
+	else
+		_service_disable
+		echo 'SUCCESS: All tmux sessions and restart service are stopped.'
+	fi
+	echo '-----'
 }
 
 function _autostart_stats {
@@ -1127,14 +1226,12 @@ function _autostart_stats {
 
 function _help {
 	string=''
-	string+='-----\n'
-	string+='FREQSTART: Simplifies the usage of freqtrade with NostalgiaForInfinity strategies.\n'
-	string+='-\n'
-	string+='Type "tmux a" to attach to latest TMUX session.\n'
-	string+='Use "ctrl+b s" to switch between TMUX sessions.\n'
-	string+='Use "ctrl+b d" to return to shell from any TMUX session.\n'
-	string+='Type "'$(basename "${scriptname}")' -k" to disable all bots and restart service.\n'
-	string+='Type "'$(basename "${scriptname}")' -a" for unattended restart of all bots excl. any installations.\n'
+	string+='  1) Type "tmux a" to attach to latest TMUX session.\n'
+	string+='  2) Use "ctrl+b s" to switch between TMUX sessions.\n'
+	string+='  3) Use "ctrl+b d" to return to shell from any TMUX session.\n'
+	string+='  4) Type "'$(basename "${scriptname}")' -k" to disable all bots and restart service.\n'
+	string+='  5) Type "'$(basename "${scriptname}")' -a" for unattended restart of all bots excl. any installations.\n'
+	string+='  6) Bots starting with database URL name "'$(echo "${freqstart_protect}" | sed 's,\.\*,,g' | sed 's,|," OR ",g')'" will NOT be restartet or disabled.\n'
 	string+='-----\n'
 	printf -- "${string}"
 	
@@ -1142,8 +1239,7 @@ function _help {
 }
 
 function _start {
-	echo 'FREQSTART: '"${freqstart_version}"
-	echo '-----'
+	_intro
 	_apt
 	_tmux
 	_ntp
@@ -1157,13 +1253,16 @@ if [[ ! -z "$*" ]]; then
 	for i in "$@"; do
 		case $i in
 			-a|--autostart)
+				_intro
 				readonly unattended='true'
 				_autostart
 			;;
 			-h|--help)
+				_intro
 				_help
 			;;
 			-k|--kill)
+				_intro
 				_kill
 			;;
 			-*|--*)
