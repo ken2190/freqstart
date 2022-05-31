@@ -8,7 +8,7 @@ Just copy your commands into a text file and freqstart will take care of the res
 Freqstart will start your bots in separate TMUX sessions and will try to restart them after a system reboot.
 You could start a hundred bots with different strategies and versions in one click.
 
-[![Freqstart Screen Shot][product-screenshot]]
+[product-screenshot]
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -56,7 +56,7 @@ Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:<br/
    ```
 5. Edit `autostart.txt` and run `freqstart.sh` again
    ```txt
-   ./autostart.txt
+   vi ./autostart.txt
    ```
    
 ### Autostart
@@ -64,15 +64,16 @@ Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:<br/
 1. bot command has to start with _freqstart_ and the rest will be ignored
 2. you can use any symbol to exclude lines but preferably use the hastag
 3. always use absolute paths to strategies and configs
-4. keep the _proxy.json_ always at the end of the line or remove it for certain bots
-5. add your strategies and configs with api keys at the end of the line but before _proxy.json_
+4. keep the proxy.json always at the end of the line or remove it for certain bots
+5. add your strategies and configs with api keys at the end of the line but before proxy.json
+5. database URL names starting with "live" or "protected" will NOT be restartet or terminated in any condition
 6. freqstart only manages the installation and start of bots and no files and functions are altered
 7. read the disclaimer...
 
 #### Example `autostart.txt` - Do not forget to change the version numbers!
    ```txt
-   freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path=/root/freqstart/NostalgiaForInfinity_v00.0.000 -c=/root/freqstart/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c=/root/freqstart/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c=/root/freqstart/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json -c=/root/freqstart/proxy.json<br>
-   # some comment will be ignored<br>
+   freqtrade trade --dry-run --db-url sqlite:///example-dryrun.sqlite --strategy=NostalgiaForInfinityX --strategy-path=/root/freqstart/NostalgiaForInfinity_v00.0.000 -c=/root/freqstart/NostalgiaForInfinity_v00.0.000/configs/pairlist-volume-binance-usdt.json -c=/root/freqstart/NostalgiaForInfinity_v00.0.000/configs/blacklist-binance.json -c=/root/freqstart/NostalgiaForInfinity_v00.0.000/configs/exampleconfig.json -c=/root/freqstart/proxy.json
+   # some comment will be ignored
    freqtrade trade --dry-run --db-url sqlite:///example2.sqlite --strategy=NostalgiaForInfinityX --strategy-path=/root/freqstart/NostalgiaForInfinity_v00.0.000 -c=/root/freqstart/everything-in-one-config.json
    ```
 
