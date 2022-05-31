@@ -22,9 +22,9 @@ readonly freqstart_service='freqstart.service'
 readonly freqstart_autostart="${scriptpath}"'/autostart.txt'
 readonly freqstart_protect='live.*|protect.*'
 readonly freqstart_configs="${scriptpath}"'/configs'
-if [[ -d "${freqstart_configs}" ]]; then mkdir -p "${freqstart_configs}"; fi
+if [[ ! -d "${freqstart_configs}" ]]; then mkdir -p "${freqstart_configs}"; fi
 readonly freqstart_setup="${scriptpath}"'/setup'
-if [[ -d "${freqstart_setup}" ]]; then mkdir -p "${freqstart_setup}"; fi
+if [[ ! -d "${freqstart_setup}" ]]; then mkdir -p "${freqstart_setup}"; fi
 readonly freqstart_setup_update="${freqstart_setup}"'/update.txt'
 readonly freqstart_setup_frequi="${freqstart_setup}"'/frequi.txt'
 readonly freqtrade="${scriptpath}"'/freqtrade'
@@ -127,7 +127,9 @@ function _apt {
 						sudo reboot;
 					else
 						printf "${string}" > "${freqstart_setup_update}";
+						clear
 						echo "A reboot is not required. Exiting..."
+						_intro
 					fi
 
 					break;;
@@ -296,7 +298,7 @@ function _frequi {
 					string=''
 					string+='installed'
 					printf "${string}" > "${freqstart_setup_frequi}";
-					
+
 					break;;
 				[nN])
 					string=''
@@ -309,6 +311,8 @@ function _frequi {
 					;;
 			esac
 		done
+		
+		echo '-----'
 	fi
 }
 
@@ -402,9 +406,9 @@ function _nginx {
 	    server_name ${server_name};
 		
 	    location / {
-	        proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-	        proxy_pass http://127.0.0.1:9999;
+		    proxy_set_header Host \$host;
+		    proxy_set_header X-Real-IP \$remote_addr;
+		    proxy_pass http://127.0.0.1:9999;
 	    }
 	}
 	server {
@@ -412,9 +416,9 @@ function _nginx {
 	    server_name ${server_name};
 
 	    location / {
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_pass http://127.0.0.1:\$server_port;
+		    proxy_set_header Host \$host;
+		    proxy_set_header X-Real-IP \$remote_addr;
+		    proxy_pass http://127.0.0.1:\$server_port;
 		}
 	}
 	END
@@ -426,13 +430,13 @@ function _nginx {
 	sudo rm -f /etc/nginx/sites-enabled/default
 
 	_nginx_restart
-	_frequi_json
+	_frequi_json "${server_name}"
 }
 
 function _nginx_restart {
-	sudo pkill -f nginx & wait $!
-	sudo systemctl start nginx
-	sudo nginx -s reload
+	sudo pkill -f nginx & wait $! 2>/dev/null
+	sudo systemctl start nginx 2>/dev/null
+	sudo nginx -s reload 2>/dev/null
 }
 
 function _nginx_conf {
@@ -467,7 +471,7 @@ function _nginx_conf {
 			
 		    location / {
 		        proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
+		        proxy_set_header X-Real-IP \$remote_addr;
 		        proxy_pass http://127.0.0.1:9999;
 		    }
 		}
@@ -480,13 +484,12 @@ function _nginx_conf {
 			
 		    location / {
 		        proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
+		        proxy_set_header X-Real-IP \$remote_addr;
 		        proxy_pass http://127.0.0.1:\$server_port;
 		    }
 		}
 		END
 		)
-		sudo ufw allow https/tcp
 	elif [[ "${mode}" == 'letsencrypt' ]]; then
 		string=$(cat <<-END
 		server {
@@ -499,7 +502,7 @@ function _nginx_conf {
 		    listen 443 ssl http2;
 		    listen [::]:443 ssl http2; 	
 		    server_name ${server_name};
-
+		
 		    ssl_certificate /etc/letsencrypt/live/${server_name}/fullchain.pem;
 		    ssl_certificate_key /etc/letsencrypt/live/${server_name}/privkey.pem;
 		    include /etc/letsencrypt/options-ssl-nginx.conf;
@@ -512,7 +515,7 @@ function _nginx_conf {
 		    }
 		    location / {
 		        proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
+		        proxy_set_header X-Real-IP \$remote_addr;
 		        proxy_pass http://127.0.0.1:9999;
 		    }
 		}
@@ -527,7 +530,7 @@ function _nginx_conf {
 			
 		    location / {
 		        proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
+		        proxy_set_header X-Real-IP \$remote_addr;
 		        proxy_pass http://127.0.0.1:\$server_port;
 		    }
 		}
@@ -542,24 +545,35 @@ function _nginx_conf {
 
 	_nginx_restart
 	
-	_frequi_json "${domain}"
+	_frequi_json "${server_name}" 'ssl'
 }
 
 function _frequi_json {
-	local domain="${1}"
+	local server_name="${1}"
+	
+	if [[ "${2}" == 'ssl' ]]; then
+		local server_protocol='https://'
+	else
+		local server_protocol='http://'
+	fi
+	
 	local file_example="${freqstart_configs}"'/frequi-example.json'
 	local file_server="${freqstart_configs}"'/frequi-server.json'
 
 	local jwt_secret_key=$(_secret)
 	local username=$(_passwd)
 	local password=$(_passwd)
+
+	if [[ ! -f "${file_example}" || ! -f "${file_server}" ]]; then
 	
-	if [[ ! -f "${file_example}" ]]; then
-		echo 'INFO: To use "FreqUI" with a bot you have to follow this steps:'
-		echo '  1) Copy the content from "'$(basename "${file_example}")'" to your config.'
-		echo '  2) Change "listen_port" to something between 9000-9100 which is NOT already used.'
-		echo '  3) Login to specific bot by adding :9000 etc. to your IP or domain on the "FreqUI" login mask.'
-		
+		echo '-----'
+		echo 'INFO: Save your login credentials or edit "configs/'"$(basename "${file_server}")"'" and "configs/'"$(basename "${file_example}")"'" files!'
+		echo '-'
+		echo 'USER: '"${username}"
+		echo 'PASSWORD: '"${password}"
+		echo '-----'
+		_cdown 10 'to continue...'
+	
 		string=''
 		string=$(cat <<-END
 		{
@@ -570,7 +584,7 @@ function _frequi_json {
 		        "verbosity": "error",
 		        "enable_openapi": false,
 		        "jwt_secret_key": "${jwt_secret_key}",
-		        "CORS_origins": [],
+		        "CORS_origins": ["${server_protocol}${server_name}"],
 		        "username": "${username}",
 		        "password": "${password}"
 		    }
@@ -578,10 +592,7 @@ function _frequi_json {
 		END
 		)
 		printf "${string}" > "${file_example}"
-	else
-		echo 'INFO: "configs/'"$(basename "${file_example}")"'" file already set.'
-	fi
-	if [[ ! -f "${file_server}" ]]; then
+
 		# have to test whats needed and what not
 		string=''
 		string=$(cat <<-END
@@ -589,82 +600,70 @@ function _frequi_json {
 		    "api_server": {
 		        "enabled": true,
 		        "listen_ip_address": "127.0.0.1",
-		        "listen_port": 8080,
+		        "listen_port": 9999,
 		        "verbosity": "error",
 		        "enable_openapi": false,
 		        "jwt_secret_key": "${jwt_secret_key}",
 		        "CORS_origins": [],
 		        "username": "${username}",
 		        "password": "${password}"
-		    }
-		},
-		"max_open_trades": 3,
-		"stake_currency": "BTC",
-		"stake_amount": 0.05,
-		"tradable_balance_ratio": 0.99,
-		"fiat_display_currency": "USD",
-		"timeframe": "5m",
-		"dry_run": true,
-		"cancel_open_orders_on_exit": false,
-		"unfilledtimeout": {
-		    "entry": 10,
-		    "exit": 10,
-		    "exit_timeout_count": 0,
-		    "unit": "minutes"
-		},
-		"entry_pricing": {
-		    "price_side": "same",
-		    "use_order_book": true,
-		    "order_book_top": 1,
-		    "price_last_balance": 0.0,
-		    "check_depth_of_market": {
-		        "enabled": false,
-		        "bids_to_ask_delta": 1
-		    }
-		},
-		"exit_pricing": {
-		    "price_side": "same",
-		    "use_order_book": true,
-		    "order_book_top": 1
-		},
-		"exchange": {
-		    "name": "binance",
-		    "key": "",
-		    "secret": "",
-		    "ccxt_config": {},
-		    "ccxt_async_config": {
 		    },
-		    "pair_whitelist": [
-		        "ETH/BTC"
+		    "max_open_trades": 3,
+		    "stake_currency": "BTC",
+		    "stake_amount": 0.05,
+		    "tradable_balance_ratio": 0.99,
+		    "fiat_display_currency": "USD",
+		    "timeframe": "5m",
+		    "dry_run": true,
+		    "cancel_open_orders_on_exit": false,
+		    "unfilledtimeout": {
+		        "entry": 10,
+		        "exit": 10,
+		        "exit_timeout_count": 0,
+		        "unit": "minutes"
+		    },
+		    "entry_pricing": {
+		        "price_side": "same",
+		        "use_order_book": true,
+		        "order_book_top": 1,
+		        "price_last_balance": 0.0,
+		        "check_depth_of_market": {
+		            "enabled": false,
+		            "bids_to_ask_delta": 1
+		        }
+		    },
+		    "exit_pricing": {
+		        "price_side": "same",
+		        "use_order_book": true,
+		        "order_book_top": 1
+		    },
+		    "exchange": {
+		        "name": "binance",
+		        "key": "",
+		        "secret": "",
+		        "ccxt_config": {},
+		        "ccxt_async_config": {
+		        },
+		        "pair_whitelist": [
+		            "ETH/BTC"
+		        ],
+		        "pair_blacklist": [
+		            "BNB/BTC"
+		        ]
+		    },
+		    "pairlists": [
+		        {"method": "StaticPairList"}
 		    ],
-		    "pair_blacklist": [
-		        "BNB/BTC"
-		    ]
-		},
-		"pairlists": [
-		    {"method": "StaticPairList"}
-		],
-		"bot_name": "frequi-server",
-		"initial_state": "running"
+		    "bot_name": "frequi-server",
+		    "initial_state": "running"
 		}
 		END
 		)
 		printf "${string}" > "${file_server}"
-	else
-		echo 'INFO: "configs/'"$(basename "${file_example}")"'" file already set.'
 	fi
 	
-	echo '-----'
-	echo 'INFO: Save your login credentials or edit "configs/'"$(basename "${file_server}")"'" and "configs/'"$(basename "${file_example}")"'" files!'
-	echo '-'
-	echo 'USER: '"${username}"
-	echo 'PASSWORD: '"${password}"
-	echo '-----'
-	_cdown 5 'to continue...'
-	
-	if [[ ! -z "${domain}" ]]; then
-		sed -i -e 's,"CORS_origins": \[.*\],"CORS_origins": \["https://'"${domain}"'"\],' "${file}"
-	fi
+	# set CORS to IP or domain
+	sed -i -e 's,"CORS_origins": \[.*\],"CORS_origins": \["'"${server_protocol}${server_name}"'"\],' "${file_example}" "${file_server}"
 }
 
 function _git {
@@ -1232,6 +1231,11 @@ function _help {
 	string+='  4) Type "'$(basename "${scriptname}")' -k" to disable all bots and restart service.\n'
 	string+='  5) Type "'$(basename "${scriptname}")' -a" for unattended restart of all bots excl. any installations.\n'
 	string+='  6) Bots starting with database URL name "'$(echo "${freqstart_protect}" | sed 's,\.\*,,g' | sed 's,|," OR ",g')'" will NOT be restartet or disabled.\n'
+    string+='\n'
+	string+='INFO: To use "FreqUI" with a bot you have to follow this steps:\n'
+	string+='  1) Copy the content from "/configs/frequi-example.json" to your config file.\n'
+	string+='  2) Change "listen_port" to something between 9000-9100 which is NOT already in use.\n'
+	string+='  3) Login to specific bot by adding :9000 etc. to your IP or domain on the "FreqUI" login mask.\n'
 	string+='-----\n'
 	printf -- "${string}"
 	
