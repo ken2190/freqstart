@@ -17,7 +17,7 @@ clear
 # USE THE SOFTWARE AT YOUR OWN RISK. THE AUTHORS AND ALL AFFILIATES ASSUME NO RESPONSIBILITY FOR YOUR TRADING RESULTS.
 #
 readonly scriptname=$(realpath $0); readonly scriptpath=$(dirname "${scriptname}")
-readonly freqstart_version='1.0.0'
+readonly freqstart_version='v1.1.0'
 readonly freqstart_service='freqstart.service'
 readonly freqstart_autostart="${scriptpath}"'/autostart.txt'
 readonly freqtrade="${scriptpath}"'/freqtrade'
@@ -154,6 +154,98 @@ function _freqtrade {
 		else
 			echo 'INFO: freqtrade latest version "'"${version}"'" installed.'
 			return 0
+		fi
+	fi
+}
+
+function _frequi_tmux {
+	_frequi_strategy
+	
+	local session='frequi-server'
+	local strategy_path="${freqtrade}"'/user_data/strategies'
+
+	_tmux_session "${session}"
+	if [[ "$?" -eq 1 ]]; then
+		echo 'INFO: Starting bot "'"${session}"'".'
+
+		/usr/bin/tmux new -s "${session}" -d
+		/usr/bin/tmux send-keys -t "${session}" "cd ${freqtrade}" C-m
+		/usr/bin/tmux send-keys -t "${session}" ". .env/bin/activate" C-m	
+		/usr/bin/tmux send-keys -t "${session}" "exec freqtrade trade --db-url sqlite:///${session}.sqlite --strategy=DoesNothingStrategy -c=${scriptpath}/frequi-server.json" C-m
+		
+		_cdown 10 'for any errors...'
+	
+		_tmux_session "${session}"
+		if [[ "$?" -eq 1 ]]; then
+			echo '-'
+			echo 'ERROR: Starting bot "'"${session}"'" in debug mode.'
+			echo '  1) Enter command: tmux a -t '"${session}"
+			echo '  2) Look for errors and missing parameters in config files.'
+			/usr/bin/tmux new -s "${session}" -d
+			/usr/bin/tmux send-keys -t "${session}" "cd ${freqtrade}" C-m
+			/usr/bin/tmux send-keys -t "${session}" ". .env/bin/activate" C-m	
+			/usr/bin/tmux send-keys -t "${session}" "freqtrade trade --db-url sqlite:///${session}.sqlite --strategy=DoesNothingStrategy -c=${scriptpath}/frequi-server.json" C-m
+		else
+			echo 'INFO: Bot "'"${session}"'" active.'
+		fi
+	else
+		echo 'INFO: Bot "'"${session}"'" active.'
+	fi
+}
+
+function _frequi_strategy {
+	local file="${freqtrade}"'/user_data/strategies/DoesNothingStrategy.py'
+
+	if [[ ! -f "${file}" ]]; then
+		string=''
+		string=$(cat <<-END
+		# --- Do not remove these libs ---
+		from freqtrade.strategy.interface import IStrategy
+		from pandas import DataFrame
+		# --------------------------------
+
+
+		class DoesNothingStrategy(IStrategy):
+		"""
+		just a skeleton
+		"""
+
+		# Minimal ROI designed for the strategy.
+		# adjust based on market conditions. We would recommend to keep it low for quick turn arounds
+		# This attribute will be overridden if the config file contains "minimal_roi"
+		minimal_roi = {
+		    "0": 0.01
+		}
+
+		# Optimal stoploss designed for the strategy
+		stoploss = -0.25
+
+		# Optimal timeframe for the strategy
+		timeframe = '5m'
+
+		def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+		    return dataframe
+
+		def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+		    dataframe.loc[
+		        (
+		        ),
+		        'buy'] = 1
+		    return dataframe
+
+		def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+		    dataframe.loc[
+		        (
+		        ),
+		        'sell'] = 1
+		    return dataframe
+		END
+		)
+		printf "${string}" > "${file}"
+
+		if [[ ! -f "${file}" ]]; then
+			echo 'ERROR: '$(basename "${file}")' does not exist.'
+			exit 1
 		fi
 	fi
 }
@@ -312,7 +404,7 @@ function _nginx {
 		listen [::]:80;
 		server_name ${server_name};
 		location / {
-			proxy_pass http://localhost:8080;
+		    proxy_pass http://localhost:9999/;
 		}
 	}
 	END
@@ -356,7 +448,7 @@ function _ssl {
 		    include snippets/ssl-params.conf;
 		    server_name ${server_name};
 		    location / {
-		    proxy_pass http://localhost:8080/;
+		    proxy_pass http://localhost:9999/;
 		    }
 		}
 		server {
@@ -392,7 +484,7 @@ function _ssl {
 		    root /var/www/html;
 		    }
 		    location / {
-		    proxy_pass http://localhost:8080/;
+		    proxy_pass http://localhost:9999/;
 		    }
 		}
 		END
@@ -411,7 +503,7 @@ function _ssl {
 
 function _frequi_json {
 	local domain="${1}"
-	local file="${scriptpath}"'/frequi.json'
+	local file="${scriptpath}"'/frequi-server.json'
 	local jwt_secret_key=$(_passwd)
 	local username=$(_passwd)
 	local password=$(_passwd)
@@ -419,19 +511,68 @@ function _frequi_json {
 	if [[ ! -f "${file}" ]]; then
 		string=''
 		string=$(cat <<-END
-			{
-			    "api_server": {
-			        "enabled": true,
-			        "listen_ip_address": "127.0.0.1",
-			        "listen_port": 8080,
-			        "verbosity": "error",
-			        "enable_openapi": false,
-			        "jwt_secret_key": "${jwt_secret_key}",
-			        "CORS_origins": [],
-			        "username": "${username}",
-			        "password": "${password}"
-			    }
-			}
+		{
+		    "api_server": {
+		        "enabled": true,
+		        "listen_ip_address": "127.0.0.1",
+		        "listen_port": 8080,
+		        "verbosity": "error",
+		        "enable_openapi": false,
+		        "jwt_secret_key": "${jwt_secret_key}",
+		        "CORS_origins": [],
+		        "username": "${username}",
+		        "password": "${password}"
+		    }
+		},
+		"max_open_trades": 3,
+		"stake_currency": "BTC",
+		"stake_amount": 0.05,
+		"tradable_balance_ratio": 0.99,
+		"fiat_display_currency": "USD",
+		"timeframe": "5m",
+		"dry_run": true,
+		"cancel_open_orders_on_exit": false,
+		"unfilledtimeout": {
+		    "entry": 10,
+		    "exit": 10,
+		    "exit_timeout_count": 0,
+		    "unit": "minutes"
+		},
+		"entry_pricing": {
+		    "price_side": "same",
+		    "use_order_book": true,
+		    "order_book_top": 1,
+		    "price_last_balance": 0.0,
+		    "check_depth_of_market": {
+		        "enabled": false,
+		        "bids_to_ask_delta": 1
+		    }
+		},
+		"exit_pricing": {
+		    "price_side": "same",
+		    "use_order_book": true,
+		    "order_book_top": 1
+		},
+		"exchange": {
+		    "name": "binance",
+		    "key": "",
+		    "secret": "",
+		    "ccxt_config": {},
+		    "ccxt_async_config": {
+		    },
+		    "pair_whitelist": [
+		        "ETH/BTC"
+		    ],
+		    "pair_blacklist": [
+		        "BNB/BTC"
+		    ]
+		},
+		"pairlists": [
+		    {"method": "StaticPairList"}
+		],
+		"bot_name": "frequi-server",
+		"initial_state": "running"
+		}
 		END
 		)
 		printf "${string}" > "${file}";
@@ -682,7 +823,7 @@ function _proxy_tmux {
 	_tmux_session "${binance_proxy}"
 	if [[ "$?" -eq 1 ]]; then
 		/usr/bin/tmux new -s "${binance_proxy}" -d
-		/usr/bin/tmux send-keys -t "${binance_proxy}" "${path_latest}"'/'"${binance_proxy}" -v Enter
+		/usr/bin/tmux send-keys -t "${binance_proxy}" "${path_latest}"'/'"${binance_proxy}"' -v' C-m
 		
 		_tmux_session "${binance_proxy}"
 		if [[ "$?" -eq 1 ]]; then
@@ -822,7 +963,8 @@ function _ntp {
 
 function _autostart {
 	_proxy
-
+	_frequi_tmux
+	
 	local count_bots=0
 
 	if [[ ! -f "${freqstart_autostart}" ]]; then
@@ -842,7 +984,7 @@ function _autostart {
 		printf "${string}" > "${freqstart_autostart}"
 		
 		if [[ ! -f "${freqstart_autostart}" ]]; then
-			echo '# ERROR: '"${freqstart_autostart}"' does not exist.'
+			echo 'ERROR: '$(basename "${freqstart_autostart}")' does not exist.'
 			exit 1
 		fi
 	fi
@@ -888,8 +1030,8 @@ function _autostart {
 			fi
 			
 			if [[ -z $(echo "${bot}" | grep -e '--strategy-path=') ]]; then
-				echo "ERROR: --strategy-path is missing."
-				local error=1
+				echo "WARNING: --strategy-path is missing."
+				#local error=1
 			fi
 			
 			if [[ -z $(echo "${bot}" | grep -e '--strategy=') ]]; then
@@ -927,7 +1069,7 @@ function _autostart {
 				/usr/bin/tmux send-keys -t "${bot_name}" ". .env/bin/activate" C-m	
 				/usr/bin/tmux send-keys -t "${bot_name}" "exec ${bot}" C-m
 				
-				_cdown 10 'for any bot errors...'
+				_cdown 10 'for any errors...'
 				
 				_tmux_session "${bot_name}"
 				if [[ "$?" -eq 0 ]]; then
@@ -953,17 +1095,15 @@ function _autostart {
 
 function _kill {
 	echo 'WARNING: Starting the purge, please be patient...'
-	#kill all sessions gracefully
 	tmux kill-session -t "${binance_proxy}" 2>/dev/null
 	while [[ ! -z $(tmux ls -F "#{session_name}" 2>/dev/null) ]]; do
-		tmux ls -F "#{session_name}" | xargs -I {} tmux send-keys -t {} C-c 2>/dev/null
+		tmux ls -F "#{session_name}" 2>/dev/null | xargs -I {} tmux send-keys -t {} C-c 2>/dev/null
 		sleep 0.1
-		tmux ls -F "#{session_name}" | xargs -I {} tmux send-keys -t {} 'exit' C-m 2>/dev/null
+		tmux ls -F "#{session_name}" 2>/dev/null | xargs -I {} tmux send-keys -t {} 'exit' C-m 2>/dev/null
 		((c++)) && ((c==100)) && break
 		sleep 0.1
 	done
 	tmux kill-server 2>/dev/null
-
 	_service_disable
 	echo "WARNING: All bots stopped and restart service is disabled."
 }
