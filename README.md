@@ -8,7 +8,7 @@ Just copy your commands into a text file and freqstart will take care of the res
 Freqstart will start your bots in separate TMUX sessions and will try to restart them after a system reboot.
 You could start a hundred bots with different strategies and versions in one click.
 
-[product-screenshot]
+![Freqstart Screen Shot][product-screenshot]
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
