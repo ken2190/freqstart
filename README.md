@@ -58,6 +58,18 @@ Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:<br/
    ```txt
    vi ./autostart.txt
    ```
+6. Run `freqstart.sh -a` to automatically restart all bots
+   ```sh
+   ./freqstart.sh -a
+   ```
+7. Run `freqstart.sh -k` to disable all non protected bots and restart service
+   ```sh
+   ./freqstart.sh -k
+   ```
+8. Run `freqstart.sh -h` for more infos
+   ```sh
+   ./freqstart.sh -h
+   ```
    
 ### Autostart
 
@@ -66,9 +78,9 @@ Get closer to Binance? Try Vultr "Tokyo" Server and get $100 usage for free:<br/
 3. always use absolute paths to strategies and configs
 4. keep the proxy.json always at the end of the line or remove it for certain bots
 5. add your strategies and configs with api keys at the end of the line but before proxy.json
-5. database URL names starting with "live" or "protected" will NOT be restartet or terminated in any condition
-6. freqstart only manages the installation and start of bots and no files and functions are altered
-7. read the disclaimer...
+6. database URL names starting with "live" or "protected" will NOT be restartet or terminated in any condition
+7. freqstart only manages the installation and start of bots and no files and functions are altered
+8. read the disclaimer...
 
 #### Example `autostart.txt` - Do not forget to change the version numbers!
    ```txt
